@@ -52,8 +52,13 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
       .setEmoji('🎫')
   );
 
+  // Render the panel text as plain content (always shows, even without the
+  // Embed Links permission) AND as an embed (nicer when the permission is granted).
+  const panelContent = `## ${title}\n${description}`;
+
   const channel = interaction.channel as TextChannel;
   const message = await channel.send({
+    content: panelContent,
     embeds: [panelEmbed(title, description)],
     components: [row],
   });
