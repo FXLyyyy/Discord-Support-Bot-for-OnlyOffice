@@ -28,17 +28,26 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     return;
   }
 
-  const title = interaction.options.getString('title') ?? '🎫 Support Tickets';
+  const title = interaction.options.getString('title') ?? '🎫 OnlyOffice Support';
   const description =
     interaction.options.getString('description') ??
-    'Need help? Click the button below to open a support ticket. Our team will assist you as soon as possible.';
+    [
+      "👋 **Hi there! Need a hand?** We're happy to help.",
+      '',
+      '**How to open a ticket:**',
+      '`1️⃣` Click the **Open a Ticket** button below',
+      '`2️⃣` Choose a category and describe your issue',
+      '`3️⃣` A private channel opens just for you and our team',
+      '',
+      '📎 You can attach files and screenshots once your ticket is open.',
+    ].join('\n');
 
   await ensureServerConfig(interaction.guildId!);
 
   const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId('open_ticket')
-      .setLabel('Open Ticket')
+      .setLabel('Open a Ticket')
       .setStyle(ButtonStyle.Primary)
       .setEmoji('🎫')
   );

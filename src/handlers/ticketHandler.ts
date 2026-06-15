@@ -257,7 +257,9 @@ export async function handleTicketModal(
   });
 
   await interaction.editReply({
-    embeds: [successEmbed(`Your ticket has been created: ${channel}`)],
+    content:
+      `✅ **Your ticket is open!** Head over to ${channel}.\n` +
+      `Our support team has been notified and will be with you shortly. 🙌`,
   });
 
   await logToChannel(
@@ -278,7 +280,13 @@ export async function closeTicket(
 
   const guild = interaction.guild!;
   const member = interaction.member as GuildMember;
-  const channel = guild.channels.cache.get(ticket.channel_id) as TextChannel | undefined;
+
+  // Resolve channel from cache, falling back to a fetch (cache can be empty on a fresh boot)
+  let channel = guild.channels.cache.get(ticket.channel_id) as TextChannel | undefined;
+  if (!channel) {
+    const fetched = await guild.channels.fetch(ticket.channel_id).catch(() => null);
+    channel = (fetched as TextChannel | null) ?? undefined;
+  }
 
   let transcriptMessages: TicketMessage[] = [];
 
@@ -319,20 +327,15 @@ export async function closeTicket(
 
   const closedTicket = await updateTicketStatus(ticket.id, 'closed');
 
-  // Fetch agent tag if claimed
-  let agentTag: string | null = null;
-  if (closedTicket.agent_id) {
-    const agentUser = await interaction.client.users
-      .fetch(closedTicket.agent_id)
-      .catch(() => null);
-    agentTag = agentUser?.tag ?? null;
-  }
-
-  // Fetch opener tag
-  const openerUser = await interaction.client.users
-    .fetch(ticket.user_id)
-    .catch(() => null);
+  // Fetch opener + agent in parallel
+  const [openerUser, agentUser] = await Promise.all([
+    interaction.client.users.fetch(ticket.user_id).catch(() => null),
+    closedTicket.agent_id
+      ? interaction.client.users.fetch(closedTicket.agent_id).catch(() => null)
+      : Promise.resolve(null),
+  ]);
   const openerTag = openerUser?.tag ?? ticket.user_id;
+  const agentTag = agentUser?.tag ?? null;
 
   // Generate HTML transcript
   const htmlContent = generateTranscriptHtml({
@@ -351,7 +354,14 @@ export async function closeTicket(
   const closeEmbed = ticketCloseEmbed(member.user, closedTicket, transcriptMessages.length);
   await logToChannel(interaction.client, guild.id, closeEmbed, transcriptFile);
 
-  // DM user for rating
+  // Friendly heads-up in the channel before it disappears
+  await channel?.send({
+    content:
+      `🔒 **This ticket has been closed by ${member}.**\n` +
+      `Thanks for reaching out to OnlyOffice Support! This channel will be removed in a few seconds. 👋`,
+  }).catch(console.error);
+
+  // DM user: confirm closure + ask for a rating
   if (openerUser) {
     const ratingRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
       ...[1, 2, 3, 4, 5].map(n =>
@@ -364,22 +374,17 @@ export async function closeTicket(
 
     await openerUser
       .send({
-        embeds: [
-          new EmbedBuilder()
-            .setTitle('How was your support experience?')
-            .setDescription(
-              `**Ticket #${ticket.ticket_number}:** ${ticket.subject}\n\n` +
-              `Please rate your experience below. Your feedback helps us improve.`
-            )
-            .setColor(Colors.Blue),
-        ],
+        content:
+          `🔒 Your ticket **#${ticket.ticket_number} — ${ticket.subject}** has been closed.\n\n` +
+          `Thanks for contacting **OnlyOffice Support**! If you have a moment, ` +
+          `we'd love to know how we did — just tap a rating below. ⭐`,
         components: [ratingRow],
       })
       .catch(() => null); // DMs may be disabled
   }
 
   await interaction.editReply({
-    embeds: [successEmbed('Ticket closed. This channel will be deleted in 5 seconds.')],
+    content: '✅ Ticket closed. The transcript has been saved and this channel will be deleted shortly.',
   });
 
   setTimeout(() => {
@@ -417,22 +422,23 @@ export async function claimTicket(
 
   const updated = await updateTicketStatus(ticket.id, 'claimed', member.id);
 
-  const channel = interaction.guild!.channels.cache.get(ticket.channel_id) as TextChannel | undefined;
+  let channel = interaction.guild!.channels.cache.get(ticket.channel_id) as TextChannel | undefined;
+  if (!channel) {
+    const fetched = await interaction.guild!.channels.fetch(ticket.channel_id).catch(() => null);
+    channel = (fetched as TextChannel | null) ?? undefined;
+  }
+
   await channel
     ?.setTopic(
       `Ticket #${ticket.ticket_number} | ${ticket.subject} | Agent: ${member.user.tag} | Status: Claimed`
     )
     .catch(console.error);
 
-  // Public claim notification visible to the ticket opener
+  // Public claim notification visible to the ticket opener — plain content so it
+  // always renders even without the Embed Links permission.
   await channel?.send({
-    embeds: [
-      new EmbedBuilder()
-        .setAuthor({ name: member.user.tag, iconURL: member.user.displayAvatarURL() })
-        .setDescription(`🙋 **${member.user}** has claimed this ticket and will assist you shortly.`)
-        .setColor(Colors.Green)
-        .setTimestamp(),
-    ],
+    content: `🙋 **${member}** has claimed this ticket and will be assisting you. Hang tight!`,
+    allowedMentions: { users: [] },
   }).catch(console.error);
 
   const reply = { embeds: [successEmbed('You have claimed this ticket.')], ephemeral: true };

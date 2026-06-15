@@ -4,24 +4,14 @@ import { saveTranscript } from '../db/transcripts';
 import { logToChannel } from '../utils/logger';
 import { Ticket, TicketMessage } from '../types';
 
-function inactivityWarnEmbed(): EmbedBuilder {
-  return new EmbedBuilder()
-    .setTitle('⏰ Inactivity Warning')
-    .setDescription(
-      'This ticket has been inactive for **24 hours**.\n\n' +
-      'If there is no activity within the next **24 hours**, the ticket will be **automatically closed**.'
-    )
-    .setColor(Colors.Yellow)
-    .setTimestamp();
-}
+const INACTIVITY_WARN_TEXT =
+  '⏰ **Just checking in!** This ticket has been quiet for **24 hours**.\n' +
+  "If we don't hear back within the next **24 hours**, it'll be closed automatically. " +
+  'Reply any time to keep it open. 🙂';
 
-function autoCloseEmbed(): EmbedBuilder {
-  return new EmbedBuilder()
-    .setTitle('🔒 Ticket Auto-Closed')
-    .setDescription('This ticket has been automatically closed due to **48 hours of inactivity**.')
-    .setColor(Colors.Red)
-    .setTimestamp();
-}
+const AUTO_CLOSE_TEXT =
+  '🔒 **This ticket was automatically closed** after 48 hours of inactivity.\n' +
+  "No worries — if you still need help, just open a new ticket and we'll pick right back up! 👋";
 
 function autoCloseLogEmbed(ticket: Ticket): EmbedBuilder {
   return new EmbedBuilder()
@@ -78,7 +68,7 @@ export async function checkInactiveTickets(client: Client): Promise<void> {
     if (channel?.isTextBased()) {
       const messages = await fetchAllMessages(channel);
       await saveTranscript({ ticketId: ticket.id, guildId: ticket.guild_id, messages }).catch(console.error);
-      await channel.send({ embeds: [autoCloseEmbed()] }).catch(console.error);
+      await channel.send({ content: AUTO_CLOSE_TEXT }).catch(console.error);
     }
 
     await updateTicketStatus(ticket.id, 'closed').catch(console.error);
@@ -94,7 +84,7 @@ export async function checkInactiveTickets(client: Client): Promise<void> {
       .catch(() => null) as TextChannel | null;
 
     if (channel?.isTextBased()) {
-      await channel.send({ embeds: [inactivityWarnEmbed()] }).catch(console.error);
+      await channel.send({ content: INACTIVITY_WARN_TEXT }).catch(console.error);
       await markInactivityWarned(ticket.id).catch(console.error);
       console.log(`[inactivity] Warned ticket #${ticket.ticket_number}`);
     }

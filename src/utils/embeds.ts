@@ -57,7 +57,7 @@ export function panelEmbed(title: string, description: string): EmbedBuilder {
     .setTitle(title)
     .setDescription(description)
     .setColor(Colors.Blue)
-    .setFooter({ text: 'OnlyOffice Support' });
+    .setFooter({ text: 'OnlyOffice Support • We usually reply within a few hours' });
 }
 
 export function ticketWelcomeEmbed(
