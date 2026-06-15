@@ -1,0 +1,23 @@
+{
+  "name": "discord-support-bot",
+  "version": "1.0.0",
+  "description": "Discord support bot for OnlyOffice with ticket panel and auto-thread features",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "nodemon",
+    "deploy-commands": "ts-node src/deploy-commands.ts"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0",
+    "discord.js": "^14.14.1",
+    "dotenv": "^16.4.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.5",
+    "nodemon": "^3.0.3",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3"
+  }
+}
