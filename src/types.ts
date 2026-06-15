@@ -29,6 +29,11 @@ export interface Ticket {
   ticket_number: number;
   subject: string;
   description: string | null;
+  category: string;
+  rating: number | null;
+  rated_at: string | null;
+  last_activity_at: string;
+  inactivity_warned_at: string | null;
   created_at: string;
   closed_at: string | null;
 }
@@ -55,3 +60,19 @@ export interface Command {
   data: { name: string; toJSON: () => unknown };
   execute: (interaction: import('discord.js').ChatInputCommandInteraction) => Promise<void>;
 }
+
+export interface TicketStats {
+  total: number;
+  open: number;
+  closedThisMonth: number;
+  avgCloseHours: number;
+  avgRating: number;
+  ratedCount: number;
+  topAgents: Array<{ agentId: string; count: number }>;
+}
+
+export const TICKET_CATEGORIES: Record<string, string> = {
+  category_1: 'Category 1',
+  category_2: 'Category 2',
+  category_3: 'Category 3',
+};

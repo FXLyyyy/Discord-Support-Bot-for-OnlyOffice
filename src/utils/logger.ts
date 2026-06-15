@@ -1,10 +1,11 @@
-import { Client, EmbedBuilder, TextChannel } from 'discord.js';
+import { Client, EmbedBuilder, TextChannel, AttachmentBuilder } from 'discord.js';
 import { getServerConfig } from '../db/servers';
 
 export async function logToChannel(
   client: Client,
   guildId: string,
-  embed: EmbedBuilder
+  embed: EmbedBuilder,
+  attachment?: AttachmentBuilder
 ): Promise<void> {
   const config = await getServerConfig(guildId);
   if (!config?.log_channel_id) {
@@ -12,7 +13,6 @@ export async function logToChannel(
     return;
   }
 
-  // Try cache first, fall back to fetch (cache can be empty on fresh start)
   const channel =
     client.channels.cache.get(config.log_channel_id) ??
     await client.channels.fetch(config.log_channel_id).catch((err) => {
@@ -21,11 +21,14 @@ export async function logToChannel(
     });
 
   if (!channel?.isTextBased()) {
-    console.warn(`[logger] Log channel ${config.log_channel_id} is not text-based or not found`);
+    console.warn(`[logger] Log channel ${config.log_channel_id} not found or not text-based`);
     return;
   }
 
-  await (channel as TextChannel).send({ embeds: [embed] }).catch((err) =>
+  const payload: Parameters<TextChannel['send']>[0] = { embeds: [embed] };
+  if (attachment) payload.files = [attachment];
+
+  await (channel as TextChannel).send(payload).catch((err) =>
     console.error('[logger] Failed to send log embed:', err)
   );
 }

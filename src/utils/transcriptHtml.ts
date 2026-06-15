@@ -1,0 +1,146 @@
+import { Ticket, TicketMessage } from '../types';
+
+const AVATAR_COLORS = [
+  '#5865f2','#57f287','#faa81a','#eb459e','#ed4245',
+  '#3ba55c','#fee75c','#9c84ec','#45ddc0','#f47b67',
+];
+
+function avatarColor(username: string): string {
+  let h = 0;
+  for (const c of username) h = (h << 5) - h + c.charCodeAt(0);
+  return AVATAR_COLORS[Math.abs(h) % AVATAR_COLORS.length];
+}
+
+function esc(s: string): string {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function fmtTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString('en-US', { hour:'2-digit', minute:'2-digit', hour12: false });
+}
+
+function fmtDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' });
+}
+
+function fmtFull(iso: string): string {
+  return new Date(iso).toLocaleString('en-US', {
+    year:'numeric', month:'short', day:'numeric',
+    hour:'2-digit', minute:'2-digit', hour12: false,
+  });
+}
+
+export function generateTranscriptHtml(params: {
+  ticket: Ticket;
+  messages: TicketMessage[];
+  openedByTag: string;
+  agentTag: string | null;
+  guildName: string;
+}): string {
+  const { ticket, messages, openedByTag, agentTag, guildName } = params;
+
+  let body = '';
+  let lastUser = '';
+  let lastDate = '';
+
+  for (const msg of messages) {
+    const d = fmtDate(msg.created_at);
+    if (d !== lastDate) {
+      body += `<div class="div">${esc(d)}</div>`;
+      lastDate = d;
+      lastUser = '';
+    }
+
+    const newGroup = msg.username !== lastUser;
+    lastUser = msg.username;
+
+    const atts = msg.attachments
+      .map(a => `<a class="att" href="${esc(a.url)}" target="_blank">📎 ${esc(a.name)}</a>`)
+      .join('');
+
+    const textHtml = msg.content
+      ? `<div class="mt">${esc(msg.content)}</div>`
+      : '';
+
+    if (newGroup) {
+      const color = avatarColor(msg.username);
+      const init = msg.username.slice(0, 2).toUpperCase();
+      body += `
+<div class="msg new">
+  <div class="avc"><div class="av" style="background:${color}">${init}</div></div>
+  <div class="cc">
+    <div class="mh"><span class="un">${esc(msg.username)}</span><span class="ts">${fmtFull(msg.created_at)}</span></div>
+    ${textHtml}${atts}
+  </div>
+</div>`;
+    } else {
+      body += `
+<div class="msg">
+  <div class="avc"><span class="ht">${fmtTime(msg.created_at)}</span></div>
+  <div class="cc">${textHtml}${atts}</div>
+</div>`;
+    }
+  }
+
+  if (!body) body = '<div class="div">No messages recorded</div>';
+
+  const stars = ticket.rating ? '⭐'.repeat(ticket.rating) : null;
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ticket #${ticket.ticket_number} — ${esc(ticket.subject)}</title>
+<style>
+:root{--bg:#313338;--bg2:#2b2d31;--bg3:#1e1f22;--t:#dbdee1;--t2:#949ba4;--mu:#6d6f78;--ac:#5865f2;--red:#f23f43;}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:var(--bg);color:var(--t);font-family:'gg sans','Noto Sans',Whitney,Arial,sans-serif;font-size:14px;line-height:1.4;}
+.hdr{background:var(--bg2);border-bottom:1px solid var(--bg3);padding:20px 32px;position:sticky;top:0;z-index:10;}
+.htop{display:flex;align-items:center;gap:10px;margin-bottom:8px;}
+h1{color:#fff;font-size:18px;font-weight:600;}
+.badge{background:var(--red);color:#fff;font-size:11px;font-weight:700;padding:2px 8px;border-radius:100px;text-transform:uppercase;}
+.stars{font-size:13px;}
+.meta{display:flex;flex-wrap:wrap;gap:16px;color:var(--t2);font-size:13px;}
+.msgs{max-width:900px;margin:0 auto;padding:16px 24px;}
+.div{display:flex;align-items:center;gap:12px;margin:16px 0;color:var(--mu);font-size:12px;font-weight:600;}
+.div::before,.div::after{content:'';flex:1;height:1px;background:var(--bg3);}
+.msg{display:flex;gap:16px;padding:2px 8px;border-radius:4px;}
+.msg:hover{background:rgba(0,0,0,.07);}
+.msg.new{margin-top:16px;}
+.avc{width:40px;flex-shrink:0;padding-top:2px;}
+.av{width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:16px;color:#fff;}
+.ht{display:none;color:var(--mu);font-size:11px;padding-top:5px;text-align:right;width:40px;}
+.msg:hover .ht{display:block;}
+.cc{flex:1;min-width:0;}
+.mh{display:flex;align-items:baseline;gap:8px;margin-bottom:2px;}
+.un{font-weight:600;color:#fff;}
+.ts{color:var(--mu);font-size:11px;}
+.mt{white-space:pre-wrap;word-break:break-word;}
+.att{display:inline-flex;align-items:center;gap:6px;margin-top:4px;padding:6px 10px;background:var(--bg2);border-radius:4px;border-left:3px solid var(--ac);color:#00aff4;font-size:13px;text-decoration:none;word-break:break-all;}
+.att:hover{text-decoration:underline;}
+.foot{text-align:center;color:var(--mu);font-size:12px;padding:32px;border-top:1px solid var(--bg3);margin-top:24px;}
+</style>
+</head>
+<body>
+<div class="hdr">
+  <div class="htop">
+    <h1>Ticket #${ticket.ticket_number} — ${esc(ticket.subject)}</h1>
+    <span class="badge">Closed</span>
+    ${stars ? `<span class="stars">${stars} ${ticket.rating}/5</span>` : ''}
+  </div>
+  <div class="meta">
+    <span>👤 ${esc(openedByTag)}</span>
+    <span>📅 Opened ${fmtFull(ticket.created_at)}</span>
+    <span>🔒 Closed ${fmtFull(ticket.closed_at ?? ticket.created_at)}</span>
+    ${agentTag ? `<span>🛡️ ${esc(agentTag)}</span>` : ''}
+    <span>🏷️ ${esc(ticket.category)}</span>
+    <span>💬 ${messages.length} messages</span>
+    <span>🏠 ${esc(guildName)}</span>
+  </div>
+</div>
+<div class="msgs">${body}</div>
+<div class="foot">Generated by ZendeskBotForOO &bull; ${new Date().toUTCString()}</div>
+</body>
+</html>`;
+}

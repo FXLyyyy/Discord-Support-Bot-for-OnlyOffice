@@ -2,9 +2,12 @@ import {
   ButtonInteraction,
   ChatInputCommandInteraction,
   ModalSubmitInteraction,
+  StringSelectMenuInteraction,
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
+  StringSelectMenuBuilder,
+  StringSelectMenuOptionBuilder,
   ChannelType,
   PermissionsBitField,
   GuildMember,
@@ -12,11 +15,14 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  AttachmentBuilder,
   Collection,
   Message,
   Snowflake,
+  EmbedBuilder,
+  Colors,
 } from 'discord.js';
-import { ServerConfig, Ticket, TicketMessage } from '../types';
+import { ServerConfig, Ticket, TicketMessage, TICKET_CATEGORIES } from '../types';
 import {
   createTicket,
   getNextTicketNumber,
@@ -34,8 +40,14 @@ import {
 } from '../utils/embeds';
 import { logToChannel } from '../utils/logger';
 import { isSupportMember } from '../utils/permissions';
+import { generateTranscriptHtml } from '../utils/transcriptHtml';
 
-type TicketInteraction = ButtonInteraction | ChatInputCommandInteraction | ModalSubmitInteraction;
+type TicketInteraction =
+  | ButtonInteraction
+  | ChatInputCommandInteraction
+  | ModalSubmitInteraction;
+
+// ── Step 1: "Open Ticket" button — show category select ───────────────────────
 
 export async function openTicket(
   interaction: ButtonInteraction,
@@ -45,38 +57,72 @@ export async function openTicket(
   const member = interaction.member as GuildMember;
 
   if (await hasOpenTicket(guild.id, member.id)) {
-    await interaction.reply({ embeds: [errorEmbed('You already have an open ticket!')], ephemeral: true });
+    await interaction.reply({
+      embeds: [errorEmbed('You already have an open ticket!')],
+      ephemeral: true,
+    });
     return;
   }
 
-  // Show modal — actual channel creation happens in handleTicketModal
+  const select = new StringSelectMenuBuilder()
+    .setCustomId('select_ticket_category')
+    .setPlaceholder('Choose a category…')
+    .addOptions(
+      Object.entries(TICKET_CATEGORIES).map(([value, label]) =>
+        new StringSelectMenuOptionBuilder().setLabel(label).setValue(value)
+      )
+    );
+
+  const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select);
+
+  await interaction.reply({
+    embeds: [
+      new EmbedBuilder()
+        .setTitle('Select a Category')
+        .setDescription('Please choose the category that best describes your issue.')
+        .setColor(Colors.Blue),
+    ],
+    components: [row],
+    ephemeral: true,
+  });
+}
+
+// ── Step 2: Category selected — show modal ────────────────────────────────────
+
+export async function handleCategorySelect(
+  interaction: StringSelectMenuInteraction
+): Promise<void> {
+  const categoryValue = interaction.values[0];
+
   const modal = new ModalBuilder()
-    .setCustomId('open_ticket_modal')
+    .setCustomId(`open_ticket_modal:${categoryValue}`)
     .setTitle('Open a Support Ticket');
 
-  const subjectInput = new TextInputBuilder()
-    .setCustomId('ticket_subject')
-    .setLabel('Subject')
-    .setStyle(TextInputStyle.Short)
-    .setPlaceholder('e.g. Can\'t open a document')
-    .setRequired(true)
-    .setMaxLength(100);
-
-  const descriptionInput = new TextInputBuilder()
-    .setCustomId('ticket_description')
-    .setLabel('Describe your issue')
-    .setStyle(TextInputStyle.Paragraph)
-    .setPlaceholder('Please provide as much detail as possible...')
-    .setRequired(true)
-    .setMaxLength(1000);
-
   modal.addComponents(
-    new ActionRowBuilder<TextInputBuilder>().addComponents(subjectInput),
-    new ActionRowBuilder<TextInputBuilder>().addComponents(descriptionInput)
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId('ticket_subject')
+        .setLabel('Subject')
+        .setStyle(TextInputStyle.Short)
+        .setPlaceholder("e.g. Can't open a document")
+        .setRequired(true)
+        .setMaxLength(100)
+    ),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId('ticket_description')
+        .setLabel('Describe your issue')
+        .setStyle(TextInputStyle.Paragraph)
+        .setPlaceholder('Please provide as much detail as possible…')
+        .setRequired(true)
+        .setMaxLength(1000)
+    )
   );
 
   await interaction.showModal(modal);
 }
+
+// ── Step 3: Modal submitted — create ticket channel ───────────────────────────
 
 export async function handleTicketModal(
   interaction: ModalSubmitInteraction,
@@ -88,6 +134,10 @@ export async function handleTicketModal(
   const member = interaction.member as GuildMember;
   const subject = interaction.fields.getTextInputValue('ticket_subject');
   const description = interaction.fields.getTextInputValue('ticket_description');
+
+  // customId format: "open_ticket_modal:category_value"
+  const categoryValue = interaction.customId.split(':')[1] ?? 'category_1';
+  const category = TICKET_CATEGORIES[categoryValue] ?? 'Category 1';
 
   if (await hasOpenTicket(guild.id, member.id)) {
     await interaction.editReply({ embeds: [errorEmbed('You already have an open ticket!')] });
@@ -139,7 +189,7 @@ export async function handleTicketModal(
     type: ChannelType.GuildText,
     parent: config.ticket_category_id ?? undefined,
     permissionOverwrites,
-    topic: `Ticket #${ticketNumber} | ${subject} | User: ${member.user.tag} | Status: Open`,
+    topic: `Ticket #${ticketNumber} | ${subject} | ${category} | User: ${member.user.tag} | Status: Open`,
   });
 
   await createTicket({
@@ -149,6 +199,7 @@ export async function handleTicketModal(
     ticketNumber,
     subject,
     description,
+    category,
   });
 
   const actionRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -182,6 +233,8 @@ export async function handleTicketModal(
   );
 }
 
+// ── Close ticket (shared by button, /close, and auto-close) ───────────────────
+
 export async function closeTicket(
   interaction: TicketInteraction,
   ticket: Ticket,
@@ -192,28 +245,24 @@ export async function closeTicket(
   const guild = interaction.guild!;
   const member = interaction.member as GuildMember;
   const channel = guild.channels.cache.get(ticket.channel_id) as TextChannel | undefined;
-  let messageCount = 0;
+  let transcriptMessages: TicketMessage[] = [];
 
   if (channel) {
     const allMessages: Message[] = [];
     let lastId: Snowflake | undefined;
 
-    // eslint-disable-next-line no-constant-condition
     while (true) {
       const batch: Collection<Snowflake, Message> = await channel.messages.fetch({
         limit: 100,
         ...(lastId ? { before: lastId } : {}),
       });
-
       if (batch.size === 0) break;
       allMessages.push(...batch.values());
       lastId = batch.last()?.id;
       if (batch.size < 100) break;
     }
 
-    messageCount = allMessages.length;
-
-    const transcriptMessages: TicketMessage[] = allMessages
+    transcriptMessages = allMessages
       .reverse()
       .filter(msg => !msg.author.bot)
       .map(msg => ({
@@ -233,13 +282,66 @@ export async function closeTicket(
     }).catch(console.error);
   }
 
-  await updateTicketStatus(ticket.id, 'closed');
+  const closedTicket = await updateTicketStatus(ticket.id, 'closed');
 
-  await logToChannel(
-    interaction.client,
-    guild.id,
-    ticketCloseEmbed(member.user, ticket, messageCount)
-  );
+  // Fetch agent tag if claimed
+  let agentTag: string | null = null;
+  if (closedTicket.agent_id) {
+    const agentUser = await interaction.client.users
+      .fetch(closedTicket.agent_id)
+      .catch(() => null);
+    agentTag = agentUser?.tag ?? null;
+  }
+
+  // Fetch opener tag
+  const openerUser = await interaction.client.users
+    .fetch(ticket.user_id)
+    .catch(() => null);
+  const openerTag = openerUser?.tag ?? ticket.user_id;
+
+  // Generate HTML transcript
+  const htmlContent = generateTranscriptHtml({
+    ticket: closedTicket,
+    messages: transcriptMessages,
+    openedByTag: openerTag,
+    agentTag,
+    guildName: guild.name,
+  });
+
+  const transcriptFile = new AttachmentBuilder(Buffer.from(htmlContent, 'utf-8'), {
+    name: `transcript-ticket-${ticket.ticket_number}.html`,
+  });
+
+  // Post close embed + transcript to log channel
+  const closeEmbed = ticketCloseEmbed(member.user, closedTicket, transcriptMessages.length);
+  await logToChannel(interaction.client, guild.id, closeEmbed, transcriptFile);
+
+  // DM user for rating
+  if (openerUser) {
+    const ratingRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      ...[1, 2, 3, 4, 5].map(n =>
+        new ButtonBuilder()
+          .setCustomId(`rate_ticket:${ticket.id}:${n}`)
+          .setLabel('⭐'.repeat(n))
+          .setStyle(n === 5 ? ButtonStyle.Primary : ButtonStyle.Secondary)
+      )
+    );
+
+    await openerUser
+      .send({
+        embeds: [
+          new EmbedBuilder()
+            .setTitle('How was your support experience?')
+            .setDescription(
+              `**Ticket #${ticket.ticket_number}:** ${ticket.subject}\n\n` +
+              `Please rate your experience below. Your feedback helps us improve.`
+            )
+            .setColor(Colors.Blue),
+        ],
+        components: [ratingRow],
+      })
+      .catch(() => null); // DMs may be disabled
+  }
 
   await interaction.editReply({
     embeds: [successEmbed('Ticket closed. This channel will be deleted in 5 seconds.')],
@@ -249,6 +351,8 @@ export async function closeTicket(
     channel?.delete('Ticket closed').catch(console.error);
   }, 5000);
 }
+
+// ── Claim ticket ──────────────────────────────────────────────────────────────
 
 export async function claimTicket(
   interaction: TicketInteraction,
@@ -280,7 +384,9 @@ export async function claimTicket(
 
   const channel = interaction.guild!.channels.cache.get(ticket.channel_id) as TextChannel | undefined;
   await channel
-    ?.setTopic(`Ticket #${ticket.ticket_number} | ${ticket.subject} | Agent: ${member.user.tag} | Status: Claimed`)
+    ?.setTopic(
+      `Ticket #${ticket.ticket_number} | ${ticket.subject} | Agent: ${member.user.tag} | Status: Claimed`
+    )
     .catch(console.error);
 
   const reply = { embeds: [successEmbed('You have claimed this ticket.')], ephemeral: true };
