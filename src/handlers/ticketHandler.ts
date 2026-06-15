@@ -47,7 +47,54 @@ type TicketInteraction =
   | ChatInputCommandInteraction
   | ModalSubmitInteraction;
 
-// ── Step 1: "Open Ticket" button — show category select ───────────────────────
+// ── Step 1: Category button on panel → show modal immediately ─────────────────
+
+export async function openTicketWithCategory(
+  interaction: ButtonInteraction,
+  config: ServerConfig,
+  categoryValue: string
+): Promise<void> {
+  const guild = interaction.guild!;
+  const member = interaction.member as GuildMember;
+
+  if (await hasOpenTicket(guild.id, member.id)) {
+    await interaction.reply({
+      embeds: [errorEmbed('You already have an open ticket!')],
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const modal = new ModalBuilder()
+    .setCustomId(`open_ticket_modal:${categoryValue}`)
+    .setTitle('Open a Support Ticket');
+
+  modal.addComponents(
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId('ticket_subject')
+        .setLabel('Subject')
+        .setStyle(TextInputStyle.Short)
+        .setPlaceholder("e.g. Can't open a document")
+        .setRequired(true)
+        .setMaxLength(100)
+    ),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId('ticket_description')
+        .setLabel('Describe your issue')
+        .setStyle(TextInputStyle.Paragraph)
+        .setPlaceholder('Please provide as much detail as possible…')
+        .setRequired(true)
+        .setMaxLength(1000)
+    )
+  );
+
+  await interaction.showModal(modal);
+}
+
+// ── Legacy: "Open Ticket" single button → show category select ────────────────
+// Kept for panels created before the 3-button layout was introduced.
 
 export async function openTicket(
   interaction: ButtonInteraction,
@@ -87,7 +134,7 @@ export async function openTicket(
   });
 }
 
-// ── Step 2: Category selected — show modal ────────────────────────────────────
+// ── Legacy step 2: Category selected → show modal ─────────────────────────────
 
 export async function handleCategorySelect(
   interaction: StringSelectMenuInteraction
@@ -218,7 +265,7 @@ export async function handleTicketModal(
   const rolePings = config.support_role_ids.map(id => `<@&${id}>`).join(' ');
   await channel.send({
     content: `${member}${rolePings ? ` | ${rolePings}` : ''}`,
-    embeds: [ticketWelcomeEmbed(member.user, ticketNumber, subject, description)],
+    embeds: [ticketWelcomeEmbed(member.user, ticketNumber, subject, description, category)],
     components: [actionRow],
   });
 
@@ -245,6 +292,16 @@ export async function closeTicket(
   const guild = interaction.guild!;
   const member = interaction.member as GuildMember;
   const channel = guild.channels.cache.get(ticket.channel_id) as TextChannel | undefined;
+
+  // Public status message visible to everyone in the ticket channel
+  await channel?.send({
+    embeds: [
+      new EmbedBuilder()
+        .setDescription(`🔒 **${member.user.tag}** is closing this ticket. Saving transcript…`)
+        .setColor(Colors.Orange),
+    ],
+  }).catch(console.error);
+
   let transcriptMessages: TicketMessage[] = [];
 
   if (channel) {
@@ -388,6 +445,17 @@ export async function claimTicket(
       `Ticket #${ticket.ticket_number} | ${ticket.subject} | Agent: ${member.user.tag} | Status: Claimed`
     )
     .catch(console.error);
+
+  // Public claim notification visible to the ticket opener
+  await channel?.send({
+    embeds: [
+      new EmbedBuilder()
+        .setAuthor({ name: member.user.tag, iconURL: member.user.displayAvatarURL() })
+        .setDescription(`🙋 **${member.user}** has claimed this ticket and will assist you shortly.`)
+        .setColor(Colors.Green)
+        .setTimestamp(),
+    ],
+  }).catch(console.error);
 
   const reply = { embeds: [successEmbed('You have claimed this ticket.')], ephemeral: true };
   interaction.deferred || interaction.replied

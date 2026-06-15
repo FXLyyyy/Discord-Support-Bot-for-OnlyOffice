@@ -39,9 +39,23 @@ export function generateTranscriptHtml(params: {
 }): string {
   const { ticket, messages, openedByTag, agentTag, guildName } = params;
 
-  let body = '';
+  // Always show the original ticket submission at the top
+  const submissionBlock = `
+<div class="submission">
+  <div class="sub-label">📋 TICKET SUBMITTED</div>
+  <div class="sub-row"><span class="sub-key">Subject</span><span class="sub-val">${esc(ticket.subject)}</span></div>
+  <div class="sub-row"><span class="sub-key">Category</span><span class="sub-val">${esc(ticket.category)}</span></div>
+  <div class="sub-row"><span class="sub-key">Description</span></div>
+  <div class="sub-desc">${esc(ticket.description ?? '—')}</div>
+</div>`;
+
+  let body = submissionBlock;
   let lastUser = '';
   let lastDate = '';
+
+  if (messages.length > 0) {
+    body += '<div class="div">CONVERSATION</div>';
+  }
 
   for (const msg of messages) {
     const d = fmtDate(msg.created_at);
@@ -82,7 +96,9 @@ export function generateTranscriptHtml(params: {
     }
   }
 
-  if (!body) body = '<div class="div">No messages recorded</div>';
+  if (messages.length === 0) {
+    body += '<div class="div">No chat messages recorded</div>';
+  }
 
   const stars = ticket.rating ? '⭐'.repeat(ticket.rating) : null;
 
@@ -120,6 +136,12 @@ h1{color:#fff;font-size:18px;font-weight:600;}
 .att{display:inline-flex;align-items:center;gap:6px;margin-top:4px;padding:6px 10px;background:var(--bg2);border-radius:4px;border-left:3px solid var(--ac);color:#00aff4;font-size:13px;text-decoration:none;word-break:break-all;}
 .att:hover{text-decoration:underline;}
 .foot{text-align:center;color:var(--mu);font-size:12px;padding:32px;border-top:1px solid var(--bg3);margin-top:24px;}
+.submission{background:var(--bg2);border:1px solid var(--bg3);border-left:3px solid var(--ac);border-radius:4px;padding:16px 20px;margin-bottom:8px;}
+.sub-label{color:var(--ac);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px;}
+.sub-row{display:flex;gap:12px;margin-bottom:2px;}
+.sub-key{color:var(--t2);font-size:13px;font-weight:600;min-width:80px;}
+.sub-val{color:var(--t);font-size:13px;}
+.sub-desc{color:var(--t);font-size:13px;white-space:pre-wrap;word-break:break-word;margin-top:8px;padding-top:8px;border-top:1px solid var(--bg3);}
 </style>
 </head>
 <body>

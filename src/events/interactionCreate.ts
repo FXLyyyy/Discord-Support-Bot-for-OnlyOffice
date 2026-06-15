@@ -10,6 +10,7 @@ import { getTicketByChannel, saveRating } from '../db/tickets';
 import { ensureServerConfig } from '../db/servers';
 import {
   openTicket,
+  openTicketWithCategory,
   closeTicket,
   claimTicket,
   handleTicketModal,
@@ -92,6 +93,13 @@ export async function execute(interaction: Interaction): Promise<void> {
   }
 
   const config = await ensureServerConfig(btn.guildId!);
+
+  // New 3-button panel: open_ticket:category_X → skip select menu, go straight to modal
+  if (btn.customId.startsWith('open_ticket:')) {
+    const categoryValue = btn.customId.slice('open_ticket:'.length);
+    await openTicketWithCategory(btn, config, categoryValue);
+    return;
+  }
 
   switch (btn.customId) {
     case 'open_ticket':

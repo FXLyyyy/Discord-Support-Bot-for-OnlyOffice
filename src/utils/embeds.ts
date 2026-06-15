@@ -64,16 +64,20 @@ export function ticketWelcomeEmbed(
   user: User,
   ticketNumber: number,
   subject: string,
-  description: string
+  description: string,
+  category: string,
 ): EmbedBuilder {
   return new EmbedBuilder()
-    .setTitle(`Ticket #${ticketNumber} — ${subject}`)
-    .setDescription(
-      `Hello ${user}! A support agent will be with you shortly.\n\n` +
-      `**Issue described:**\n${description}`
-    )
+    .setAuthor({ name: `Ticket #${ticketNumber}`, iconURL: user.displayAvatarURL() })
+    .setTitle(subject)
     .setColor(Colors.Blue)
-    .setFooter({ text: 'Use the buttons below to claim or close this ticket.' })
+    .setThumbnail(user.displayAvatarURL())
+    .addFields(
+      { name: '👤 Opened By', value: `${user}`, inline: true },
+      { name: '🏷️ Category',  value: category,   inline: true },
+      { name: '📝 Description', value: description, inline: false },
+    )
+    .setFooter({ text: 'A support agent will claim this ticket shortly.' })
     .setTimestamp();
 }
 
