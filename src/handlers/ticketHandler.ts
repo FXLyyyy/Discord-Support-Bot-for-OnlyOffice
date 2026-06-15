@@ -28,7 +28,7 @@ import {
   createTicket,
   getNextTicketNumber,
   updateTicketStatus,
-  hasOpenTicket,
+  getOpenTicketForUser,
 } from '../db/tickets';
 import { saveTranscript } from '../db/transcripts';
 import {
@@ -57,9 +57,13 @@ export async function openTicket(
   const guild = interaction.guild!;
   const member = interaction.member as GuildMember;
 
-  if (await hasOpenTicket(guild.id, member.id)) {
+  const existing = await getOpenTicketForUser(guild.id, member.id);
+  if (existing) {
     await interaction.reply({
-      embeds: [errorEmbed('You already have an open ticket!')],
+      content:
+        `⚠️ **You already have an open ticket.**\n` +
+        `To keep things organized, each member can have only **one live ticket at a time**.\n\n` +
+        `👉 Please continue in <#${existing.channel_id}> — once it's closed, you can open a new one.`,
       ephemeral: true,
     });
     return;
@@ -158,8 +162,13 @@ export async function handleTicketModal(
     category = match ?? raw; // accept free text if it doesn't match a known label
   }
 
-  if (await hasOpenTicket(guild.id, member.id)) {
-    await interaction.editReply({ embeds: [errorEmbed('You already have an open ticket!')] });
+  const existing = await getOpenTicketForUser(guild.id, member.id);
+  if (existing) {
+    await interaction.editReply({
+      content:
+        `⚠️ **You already have an open ticket.** Each member can have only one live ticket at a time.\n` +
+        `👉 Please continue in <#${existing.channel_id}>.`,
+    });
     return;
   }
 

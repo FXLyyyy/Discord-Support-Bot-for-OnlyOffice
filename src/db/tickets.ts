@@ -84,6 +84,23 @@ export async function hasOpenTicket(guildId: string, userId: string): Promise<bo
   return !!(data && data.length > 0);
 }
 
+// Returns the user's current live (open or claimed) ticket, if any.
+export async function getOpenTicketForUser(
+  guildId: string,
+  userId: string
+): Promise<Ticket | null> {
+  const { data } = await supabase
+    .from('tickets')
+    .select('*')
+    .eq('guild_id', guildId)
+    .eq('user_id', userId)
+    .in('status', ['open', 'claimed'])
+    .order('created_at', { ascending: false })
+    .limit(1);
+
+  return data && data.length > 0 ? (data[0] as Ticket) : null;
+}
+
 export async function getTicketMessages(ticketId: string): Promise<TicketMessage[]> {
   const { data, error } = await supabase
     .from('ticket_messages')
