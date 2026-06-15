@@ -1,6 +1,10 @@
 import {
   ButtonInteraction,
   ChatInputCommandInteraction,
+  ModalSubmitInteraction,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
   ChannelType,
   PermissionsBitField,
   GuildMember,
@@ -31,16 +35,59 @@ import {
 import { logToChannel } from '../utils/logger';
 import { isSupportMember } from '../utils/permissions';
 
-type TicketInteraction = ButtonInteraction | ChatInputCommandInteraction;
+type TicketInteraction = ButtonInteraction | ChatInputCommandInteraction | ModalSubmitInteraction;
 
 export async function openTicket(
   interaction: ButtonInteraction,
+  config: ServerConfig
+): Promise<void> {
+  const guild = interaction.guild!;
+  const member = interaction.member as GuildMember;
+
+  if (await hasOpenTicket(guild.id, member.id)) {
+    await interaction.reply({ embeds: [errorEmbed('You already have an open ticket!')], ephemeral: true });
+    return;
+  }
+
+  // Show modal — actual channel creation happens in handleTicketModal
+  const modal = new ModalBuilder()
+    .setCustomId('open_ticket_modal')
+    .setTitle('Open a Support Ticket');
+
+  const subjectInput = new TextInputBuilder()
+    .setCustomId('ticket_subject')
+    .setLabel('Subject')
+    .setStyle(TextInputStyle.Short)
+    .setPlaceholder('e.g. Can\'t open a document')
+    .setRequired(true)
+    .setMaxLength(100);
+
+  const descriptionInput = new TextInputBuilder()
+    .setCustomId('ticket_description')
+    .setLabel('Describe your issue')
+    .setStyle(TextInputStyle.Paragraph)
+    .setPlaceholder('Please provide as much detail as possible...')
+    .setRequired(true)
+    .setMaxLength(1000);
+
+  modal.addComponents(
+    new ActionRowBuilder<TextInputBuilder>().addComponents(subjectInput),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(descriptionInput)
+  );
+
+  await interaction.showModal(modal);
+}
+
+export async function handleTicketModal(
+  interaction: ModalSubmitInteraction,
   config: ServerConfig
 ): Promise<void> {
   await interaction.deferReply({ ephemeral: true });
 
   const guild = interaction.guild!;
   const member = interaction.member as GuildMember;
+  const subject = interaction.fields.getTextInputValue('ticket_subject');
+  const description = interaction.fields.getTextInputValue('ticket_description');
 
   if (await hasOpenTicket(guild.id, member.id)) {
     await interaction.editReply({ embeds: [errorEmbed('You already have an open ticket!')] });
@@ -107,6 +154,8 @@ export async function openTicket(
     channelId: channel.id,
     userId: member.id,
     ticketNumber,
+    subject,
+    description,
   });
 
   const actionRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -124,7 +173,7 @@ export async function openTicket(
 
   await channel.send({
     content: `${member}`,
-    embeds: [ticketWelcomeEmbed(member.user, ticketNumber)],
+    embeds: [ticketWelcomeEmbed(member.user, ticketNumber, subject, description)],
     components: [actionRow],
   });
 
@@ -135,7 +184,7 @@ export async function openTicket(
   await logToChannel(
     interaction.client,
     guild.id,
-    ticketOpenEmbed(member.user, ticketNumber, channel.id)
+    ticketOpenEmbed(member.user, ticketNumber, channel.id, subject)
   );
 }
 

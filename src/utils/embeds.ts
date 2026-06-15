@@ -1,14 +1,20 @@
 import { EmbedBuilder, Colors, User } from 'discord.js';
 import { Ticket, ServerConfig } from '../types';
 
-export function ticketOpenEmbed(user: User, ticketNumber: number, channelId: string): EmbedBuilder {
+export function ticketOpenEmbed(
+  user: User,
+  ticketNumber: number,
+  channelId: string,
+  subject: string
+): EmbedBuilder {
   return new EmbedBuilder()
     .setTitle('🎫 Ticket Opened')
     .setColor(Colors.Green)
     .addFields(
       { name: 'User', value: `${user} (${user.tag})`, inline: true },
       { name: 'Ticket #', value: String(ticketNumber), inline: true },
-      { name: 'Channel', value: `<#${channelId}>`, inline: true }
+      { name: 'Channel', value: `<#${channelId}>`, inline: true },
+      { name: 'Subject', value: subject, inline: false }
     )
     .setThumbnail(user.displayAvatarURL())
     .setTimestamp();
@@ -54,14 +60,20 @@ export function panelEmbed(title: string, description: string): EmbedBuilder {
     .setFooter({ text: 'OnlyOffice Support' });
 }
 
-export function ticketWelcomeEmbed(user: User, ticketNumber: number): EmbedBuilder {
+export function ticketWelcomeEmbed(
+  user: User,
+  ticketNumber: number,
+  subject: string,
+  description: string
+): EmbedBuilder {
   return new EmbedBuilder()
-    .setTitle(`Ticket #${ticketNumber}`)
+    .setTitle(`Ticket #${ticketNumber} — ${subject}`)
     .setDescription(
       `Hello ${user}! A support agent will be with you shortly.\n\n` +
-      `Please describe your issue in as much detail as possible.`
+      `**Issue described:**\n${description}`
     )
     .setColor(Colors.Blue)
+    .setFooter({ text: 'Use the buttons below to claim or close this ticket.' })
     .setTimestamp();
 }
 

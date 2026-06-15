@@ -27,6 +27,8 @@ export interface Ticket {
   agent_id: string | null;
   status: TicketStatus;
   ticket_number: number;
+  subject: string;
+  description: string | null;
   created_at: string;
   closed_at: string | null;
 }

@@ -6,6 +6,8 @@ export async function createTicket(params: {
   channelId: string;
   userId: string;
   ticketNumber: number;
+  subject: string;
+  description: string;
 }): Promise<Ticket> {
   const { data, error } = await supabase
     .from('tickets')
@@ -14,6 +16,8 @@ export async function createTicket(params: {
       channel_id: params.channelId,
       user_id: params.userId,
       ticket_number: params.ticketNumber,
+      subject: params.subject,
+      description: params.description,
       status: 'open',
     })
     .select()

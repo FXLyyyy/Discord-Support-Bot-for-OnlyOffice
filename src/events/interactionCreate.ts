@@ -1,7 +1,7 @@
-import { Interaction, ButtonInteraction } from 'discord.js';
+import { Interaction, ButtonInteraction, ModalSubmitInteraction } from 'discord.js';
 import { getTicketByChannel } from '../db/tickets';
 import { ensureServerConfig } from '../db/servers';
-import { openTicket, closeTicket, claimTicket } from '../handlers/ticketHandler';
+import { openTicket, closeTicket, claimTicket, handleTicketModal } from '../handlers/ticketHandler';
 import { Command } from '../types';
 
 export const name = 'interactionCreate';
@@ -26,6 +26,15 @@ export async function execute(interaction: Interaction): Promise<void> {
       } else {
         await interaction.reply(payload).catch(console.error);
       }
+    }
+    return;
+  }
+
+  // ── Modal submissions ─────────────────────────────────────────────────────
+  if (interaction.isModalSubmit()) {
+    if (interaction.customId === 'open_ticket_modal') {
+      const config = await ensureServerConfig(interaction.guildId!);
+      await handleTicketModal(interaction as ModalSubmitInteraction, config);
     }
     return;
   }
