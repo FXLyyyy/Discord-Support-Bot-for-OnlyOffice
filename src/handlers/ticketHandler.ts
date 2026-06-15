@@ -235,18 +235,25 @@ export async function handleTicketModal(
   );
 
   const rolePings = config.support_role_ids.map(id => `<@&${id}>`).join(' ');
+
+  // Critical ticket info lives in plain message content so it ALWAYS renders,
+  // even if the bot lacks the "Embed Links" permission in this channel.
+  const infoContent =
+    `${member}${rolePings ? ` | ${rolePings}` : ''}\n\n` +
+    `🎫 **Ticket #${ticketNumber} — ${subject}**\n` +
+    `**Opened by:** ${member}\n` +
+    `**Category:** ${category}\n\n` +
+    `**Description:**\n>>> ${description}`;
+
   await channel.send({
-    content: `${member}${rolePings ? ` | ${rolePings}` : ''}`,
+    content: infoContent,
     embeds: [ticketWelcomeEmbed(member.user, ticketNumber, subject, description, category)],
     components: [actionRow],
+    allowedMentions: { users: [member.id], roles: config.support_role_ids },
   });
 
   await channel.send({
-    embeds: [
-      new EmbedBuilder()
-        .setDescription('📎 Need to share a file or screenshot? Upload it directly in this channel.')
-        .setColor(Colors.Blue),
-    ],
+    content: '📎 Need to share a file or screenshot? Upload it directly in this channel.',
   });
 
   await interaction.editReply({
