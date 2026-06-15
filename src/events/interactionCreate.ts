@@ -45,8 +45,16 @@ export async function execute(interaction: Interaction): Promise<void> {
   // ── Modal submissions ──────────────────────────────────────────────────────
   if (interaction.isModalSubmit()) {
     if (interaction.customId.startsWith('open_ticket_modal')) {
-      const config = await ensureServerConfig(interaction.guildId!);
-      await handleTicketModal(interaction as ModalSubmitInteraction, config);
+      try {
+        const config = await ensureServerConfig(interaction.guildId!);
+        await handleTicketModal(interaction as ModalSubmitInteraction, config);
+      } catch (err) {
+        console.error('[modal] handleTicketModal error:', err);
+        const payload = { content: '❌ Failed to create ticket. Please try again.', ephemeral: true };
+        interaction.replied || interaction.deferred
+          ? await interaction.followUp(payload).catch(console.error)
+          : await interaction.reply(payload).catch(console.error);
+      }
     }
     return;
   }

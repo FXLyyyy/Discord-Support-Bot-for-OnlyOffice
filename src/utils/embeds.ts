@@ -68,15 +68,14 @@ export function ticketWelcomeEmbed(
   category: string,
 ): EmbedBuilder {
   return new EmbedBuilder()
-    .setAuthor({ name: `Ticket #${ticketNumber}`, iconURL: user.displayAvatarURL() })
-    .setTitle(subject)
+    .setTitle(`Ticket #${ticketNumber} — ${subject}`)
+    .setDescription(
+      `**Opened by:** <@${user.id}>\n` +
+      `**Category:** ${category}\n\n` +
+      `**Description:**\n${description}`
+    )
     .setColor(Colors.Blue)
     .setThumbnail(user.displayAvatarURL())
-    .addFields(
-      { name: '👤 Opened By', value: `${user}`, inline: true },
-      { name: '🏷️ Category',  value: category,   inline: true },
-      { name: '📝 Description', value: description, inline: false },
-    )
     .setFooter({ text: 'A support agent will claim this ticket shortly.' })
     .setTimestamp();
 }
