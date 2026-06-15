@@ -293,15 +293,6 @@ export async function closeTicket(
   const member = interaction.member as GuildMember;
   const channel = guild.channels.cache.get(ticket.channel_id) as TextChannel | undefined;
 
-  // Public status message visible to everyone in the ticket channel
-  await channel?.send({
-    embeds: [
-      new EmbedBuilder()
-        .setDescription(`🔒 **${member.user.tag}** is closing this ticket. Saving transcript…`)
-        .setColor(Colors.Orange),
-    ],
-  }).catch(console.error);
-
   let transcriptMessages: TicketMessage[] = [];
 
   if (channel) {
