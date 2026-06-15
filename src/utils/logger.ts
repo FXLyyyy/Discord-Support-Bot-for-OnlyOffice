@@ -7,10 +7,25 @@ export async function logToChannel(
   embed: EmbedBuilder
 ): Promise<void> {
   const config = await getServerConfig(guildId);
-  if (!config?.log_channel_id) return;
+  if (!config?.log_channel_id) {
+    console.warn(`[logger] No log_channel_id configured for guild ${guildId}`);
+    return;
+  }
 
-  const channel = client.channels.cache.get(config.log_channel_id);
-  if (!channel?.isTextBased()) return;
+  // Try cache first, fall back to fetch (cache can be empty on fresh start)
+  const channel =
+    client.channels.cache.get(config.log_channel_id) ??
+    await client.channels.fetch(config.log_channel_id).catch((err) => {
+      console.error(`[logger] Failed to fetch log channel ${config.log_channel_id}:`, err);
+      return null;
+    });
 
-  await (channel as TextChannel).send({ embeds: [embed] }).catch(console.error);
+  if (!channel?.isTextBased()) {
+    console.warn(`[logger] Log channel ${config.log_channel_id} is not text-based or not found`);
+    return;
+  }
+
+  await (channel as TextChannel).send({ embeds: [embed] }).catch((err) =>
+    console.error('[logger] Failed to send log embed:', err)
+  );
 }

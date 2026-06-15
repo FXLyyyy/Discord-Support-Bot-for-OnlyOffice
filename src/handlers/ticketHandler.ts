@@ -96,57 +96,50 @@ export async function handleTicketModal(
 
   const ticketNumber = await getNextTicketNumber(guild.id);
 
-  const permissionOverwrites: {
-    id: string;
-    allow?: bigint[];
-    deny?: bigint[];
-  }[] = [
-    {
-      id: guild.roles.everyone.id,
-      deny: [PermissionsBitField.Flags.ViewChannel],
-    },
-    {
-      id: member.id,
-      allow: [
-        PermissionsBitField.Flags.ViewChannel,
-        PermissionsBitField.Flags.SendMessages,
-        PermissionsBitField.Flags.ReadMessageHistory,
-        PermissionsBitField.Flags.AttachFiles,
-        PermissionsBitField.Flags.EmbedLinks,
-      ],
-    },
-    {
-      id: interaction.client.user.id,
-      allow: [
-        PermissionsBitField.Flags.ViewChannel,
-        PermissionsBitField.Flags.SendMessages,
-        PermissionsBitField.Flags.ManageChannels,
-        PermissionsBitField.Flags.ReadMessageHistory,
-        PermissionsBitField.Flags.ManageMessages,
-      ],
-    },
-  ];
+  const userAllow = new PermissionsBitField([
+    PermissionsBitField.Flags.ViewChannel,
+    PermissionsBitField.Flags.SendMessages,
+    PermissionsBitField.Flags.ReadMessageHistory,
+    PermissionsBitField.Flags.AttachFiles,
+    PermissionsBitField.Flags.EmbedLinks,
+    PermissionsBitField.Flags.UseApplicationCommands,
+    PermissionsBitField.Flags.AddReactions,
+  ]);
 
-  for (const roleId of config.support_role_ids) {
-    permissionOverwrites.push({
-      id: roleId,
-      allow: [
-        PermissionsBitField.Flags.ViewChannel,
-        PermissionsBitField.Flags.SendMessages,
-        PermissionsBitField.Flags.ReadMessageHistory,
-        PermissionsBitField.Flags.AttachFiles,
-        PermissionsBitField.Flags.EmbedLinks,
-        PermissionsBitField.Flags.ManageMessages,
-      ],
-    });
-  }
+  const staffAllow = new PermissionsBitField([
+    PermissionsBitField.Flags.ViewChannel,
+    PermissionsBitField.Flags.SendMessages,
+    PermissionsBitField.Flags.ReadMessageHistory,
+    PermissionsBitField.Flags.AttachFiles,
+    PermissionsBitField.Flags.EmbedLinks,
+    PermissionsBitField.Flags.UseApplicationCommands,
+    PermissionsBitField.Flags.ManageMessages,
+    PermissionsBitField.Flags.AddReactions,
+  ]);
+
+  const botAllow = new PermissionsBitField([
+    PermissionsBitField.Flags.ViewChannel,
+    PermissionsBitField.Flags.SendMessages,
+    PermissionsBitField.Flags.ManageChannels,
+    PermissionsBitField.Flags.ReadMessageHistory,
+    PermissionsBitField.Flags.ManageMessages,
+    PermissionsBitField.Flags.AttachFiles,
+    PermissionsBitField.Flags.EmbedLinks,
+  ]);
+
+  const permissionOverwrites = [
+    { id: guild.roles.everyone.id, deny: PermissionsBitField.Flags.ViewChannel },
+    { id: member.id, allow: userAllow },
+    { id: interaction.client.user.id, allow: botAllow },
+    ...config.support_role_ids.map(roleId => ({ id: roleId, allow: staffAllow })),
+  ];
 
   const channel = await guild.channels.create({
     name: `ticket-${ticketNumber}`,
     type: ChannelType.GuildText,
     parent: config.ticket_category_id ?? undefined,
     permissionOverwrites,
-    topic: `Ticket #${ticketNumber} | User: ${member.user.tag} | Status: Open`,
+    topic: `Ticket #${ticketNumber} | ${subject} | User: ${member.user.tag} | Status: Open`,
   });
 
   await createTicket({
@@ -171,8 +164,9 @@ export async function handleTicketModal(
       .setEmoji('🔒')
   );
 
+  const rolePings = config.support_role_ids.map(id => `<@&${id}>`).join(' ');
   await channel.send({
-    content: `${member}`,
+    content: `${member}${rolePings ? ` | ${rolePings}` : ''}`,
     embeds: [ticketWelcomeEmbed(member.user, ticketNumber, subject, description)],
     components: [actionRow],
   });
@@ -286,7 +280,7 @@ export async function claimTicket(
 
   const channel = interaction.guild!.channels.cache.get(ticket.channel_id) as TextChannel | undefined;
   await channel
-    ?.setTopic(`Ticket #${ticket.ticket_number} | Agent: ${member.user.tag} | Status: Claimed`)
+    ?.setTopic(`Ticket #${ticket.ticket_number} | ${ticket.subject} | Agent: ${member.user.tag} | Status: Claimed`)
     .catch(console.error);
 
   const reply = { embeds: [successEmbed('You have claimed this ticket.')], ephemeral: true };
