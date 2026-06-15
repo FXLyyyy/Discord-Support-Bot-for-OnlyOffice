@@ -1,6 +1,8 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder, Colors, TextChannel } from 'discord.js';
+import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder, Colors, TextChannel, GuildMember } from 'discord.js';
 import { getTicketByChannel } from '../db/tickets';
+import { getServerConfig } from '../db/servers';
 import { errorEmbed } from '../utils/embeds';
+import { isSupportMember } from '../utils/permissions';
 
 export const data = new SlashCommandBuilder()
   .setName('ticket-info')
@@ -19,6 +21,14 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
+  const config = await getServerConfig(interaction.guildId!);
+  const member = interaction.member as GuildMember;
+
+  if (!config || !isSupportMember(member, config)) {
+    await interaction.reply({ embeds: [errorEmbed('Only support staff can use this command.')], ephemeral: true });
+    return;
+  }
+
   const ticket = await getTicketByChannel(interaction.channelId);
   if (!ticket || ticket.status === 'closed') {
     await interaction.reply({ embeds: [errorEmbed('This is not an active ticket channel.')], ephemeral: true });
