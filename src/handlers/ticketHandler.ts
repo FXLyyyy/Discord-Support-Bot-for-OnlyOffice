@@ -22,6 +22,7 @@ import {
   EmbedBuilder,
   Colors,
 } from 'discord.js';
+// StringSelectMenu* kept for the legacy openTicket fallback path
 import { ServerConfig, Ticket, TicketMessage, TICKET_CATEGORIES } from '../types';
 import {
   createTicket,
@@ -47,54 +48,7 @@ type TicketInteraction =
   | ChatInputCommandInteraction
   | ModalSubmitInteraction;
 
-// ── Step 1: Category button on panel → show modal immediately ─────────────────
-
-export async function openTicketWithCategory(
-  interaction: ButtonInteraction,
-  config: ServerConfig,
-  categoryValue: string
-): Promise<void> {
-  const guild = interaction.guild!;
-  const member = interaction.member as GuildMember;
-
-  if (await hasOpenTicket(guild.id, member.id)) {
-    await interaction.reply({
-      embeds: [errorEmbed('You already have an open ticket!')],
-      ephemeral: true,
-    });
-    return;
-  }
-
-  const modal = new ModalBuilder()
-    .setCustomId(`open_ticket_modal:${categoryValue}`)
-    .setTitle('Open a Support Ticket');
-
-  modal.addComponents(
-    new ActionRowBuilder<TextInputBuilder>().addComponents(
-      new TextInputBuilder()
-        .setCustomId('ticket_subject')
-        .setLabel('Subject')
-        .setStyle(TextInputStyle.Short)
-        .setPlaceholder("e.g. Can't open a document")
-        .setRequired(true)
-        .setMaxLength(100)
-    ),
-    new ActionRowBuilder<TextInputBuilder>().addComponents(
-      new TextInputBuilder()
-        .setCustomId('ticket_description')
-        .setLabel('Describe your issue')
-        .setStyle(TextInputStyle.Paragraph)
-        .setPlaceholder('Please provide as much detail as possible…')
-        .setRequired(true)
-        .setMaxLength(1000)
-    )
-  );
-
-  await interaction.showModal(modal);
-}
-
-// ── Legacy: "Open Ticket" single button → show category select ────────────────
-// Kept for panels created before the 3-button layout was introduced.
+// ── "Open Ticket" button → modal with category + subject + description ────────
 
 export async function openTicket(
   interaction: ButtonInteraction,
@@ -111,41 +65,23 @@ export async function openTicket(
     return;
   }
 
-  const select = new StringSelectMenuBuilder()
-    .setCustomId('select_ticket_category')
-    .setPlaceholder('Choose a category…')
-    .addOptions(
-      Object.entries(TICKET_CATEGORIES).map(([value, label]) =>
-        new StringSelectMenuOptionBuilder().setLabel(label).setValue(value)
-      )
-    );
-
-  const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select);
-
-  await interaction.reply({
-    embeds: [
-      new EmbedBuilder()
-        .setTitle('Select a Category')
-        .setDescription('Please choose the category that best describes your issue.')
-        .setColor(Colors.Blue),
-    ],
-    components: [row],
-    ephemeral: true,
-  });
-}
-
-// ── Legacy step 2: Category selected → show modal ─────────────────────────────
-
-export async function handleCategorySelect(
-  interaction: StringSelectMenuInteraction
-): Promise<void> {
-  const categoryValue = interaction.values[0];
+  const categoryHint = Object.values(TICKET_CATEGORIES).join('  ·  ');
 
   const modal = new ModalBuilder()
-    .setCustomId(`open_ticket_modal:${categoryValue}`)
+    .setCustomId('open_ticket_modal')
     .setTitle('Open a Support Ticket');
 
   modal.addComponents(
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId('ticket_category')
+        .setLabel('Category')
+        .setStyle(TextInputStyle.Short)
+        .setPlaceholder(categoryHint)
+        .setValue(Object.values(TICKET_CATEGORIES)[0])
+        .setRequired(true)
+        .setMaxLength(50)
+    ),
     new ActionRowBuilder<TextInputBuilder>().addComponents(
       new TextInputBuilder()
         .setCustomId('ticket_subject')
@@ -169,6 +105,33 @@ export async function handleCategorySelect(
   await interaction.showModal(modal);
 }
 
+// ── Kept for backward compatibility (old panels still emit this) ──────────────
+
+export async function handleCategorySelect(
+  interaction: StringSelectMenuInteraction
+): Promise<void> {
+  // Old panels with a select menu: just show the modal using the chosen category
+  const categoryValue = interaction.values[0];
+  const modal = new ModalBuilder()
+    .setCustomId(`open_ticket_modal:${categoryValue}`)
+    .setTitle('Open a Support Ticket');
+  modal.addComponents(
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId('ticket_subject').setLabel('Subject')
+        .setStyle(TextInputStyle.Short).setPlaceholder("e.g. Can't open a document")
+        .setRequired(true).setMaxLength(100)
+    ),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId('ticket_description').setLabel('Describe your issue')
+        .setStyle(TextInputStyle.Paragraph).setPlaceholder('Please provide as much detail as possible…')
+        .setRequired(true).setMaxLength(1000)
+    )
+  );
+  await interaction.showModal(modal);
+}
+
 // ── Step 3: Modal submitted — create ticket channel ───────────────────────────
 
 export async function handleTicketModal(
@@ -182,9 +145,18 @@ export async function handleTicketModal(
   const subject = interaction.fields.getTextInputValue('ticket_subject');
   const description = interaction.fields.getTextInputValue('ticket_description');
 
-  // customId format: "open_ticket_modal:category_value"
-  const categoryValue = interaction.customId.split(':')[1] ?? 'category_1';
-  const category = TICKET_CATEGORIES[categoryValue] ?? 'Category 1';
+  // New modal: category is a text field. Legacy modal: category is in the customId.
+  let category: string;
+  if (interaction.customId.includes(':')) {
+    const categoryValue = interaction.customId.split(':')[1] ?? 'category_1';
+    category = TICKET_CATEGORIES[categoryValue] ?? Object.values(TICKET_CATEGORIES)[0];
+  } else {
+    const raw = interaction.fields.getTextInputValue('ticket_category').trim();
+    const match = Object.values(TICKET_CATEGORIES).find(
+      label => label.toLowerCase() === raw.toLowerCase()
+    );
+    category = match ?? raw; // accept free text if it doesn't match a known label
+  }
 
   if (await hasOpenTicket(guild.id, member.id)) {
     await interaction.editReply({ embeds: [errorEmbed('You already have an open ticket!')] });
@@ -267,6 +239,14 @@ export async function handleTicketModal(
     content: `${member}${rolePings ? ` | ${rolePings}` : ''}`,
     embeds: [ticketWelcomeEmbed(member.user, ticketNumber, subject, description, category)],
     components: [actionRow],
+  });
+
+  await channel.send({
+    embeds: [
+      new EmbedBuilder()
+        .setDescription('📎 Need to share a file or screenshot? Upload it directly in this channel.')
+        .setColor(Colors.Blue),
+    ],
   });
 
   await interaction.editReply({

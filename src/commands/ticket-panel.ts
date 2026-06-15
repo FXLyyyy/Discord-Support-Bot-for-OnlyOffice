@@ -10,7 +10,6 @@ import {
 import { panelEmbed, errorEmbed } from '../utils/embeds';
 import { ensureServerConfig } from '../db/servers';
 import { supabase } from '../db/client';
-import { TICKET_CATEGORIES } from '../types';
 
 export const data = new SlashCommandBuilder()
   .setName('ticket-panel')
@@ -36,18 +35,13 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
 
   await ensureServerConfig(interaction.guildId!);
 
-  const BUTTON_STYLES = [ButtonStyle.Primary, ButtonStyle.Success, ButtonStyle.Secondary];
-  const BUTTON_EMOJIS = ['📋', '🔧', '💡'];
-
-  const buttons = Object.entries(TICKET_CATEGORIES).map(([value, label], i) =>
+  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
-      .setCustomId(`open_ticket:${value}`)
-      .setLabel(label)
-      .setStyle(BUTTON_STYLES[i] ?? ButtonStyle.Secondary)
-      .setEmoji(BUTTON_EMOJIS[i] ?? '🎫')
+      .setCustomId('open_ticket')
+      .setLabel('Open Ticket')
+      .setStyle(ButtonStyle.Primary)
+      .setEmoji('🎫')
   );
-
-  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(...buttons);
 
   const channel = interaction.channel as TextChannel;
   const message = await channel.send({
