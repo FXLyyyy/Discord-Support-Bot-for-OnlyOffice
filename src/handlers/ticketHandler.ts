@@ -54,7 +54,8 @@ import {
 import { logToChannel } from '../utils/logger';
 import { isSupportMember } from '../utils/permissions';
 import { generateTranscriptHtml } from '../utils/transcriptHtml';
-import { uploadTranscript } from '../utils/docspace';
+import { generateTranscriptPdf } from '../utils/transcriptPdf';
+import { createTicketFolder, uploadBufferToFolder, uploadUrlToFolder } from '../utils/docspace';
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -548,21 +549,35 @@ export async function closeTicket(
     guildName: guild.name,
   });
 
-  // Archive the full transcript to DocSpace (canonical store). Internal link,
-  // staff-only — no-op if DocSpace isn't configured yet.
-  const docspace = await uploadTranscript(
-    `ticket-${ticket.ticket_number}-${openerTag}.html`,
-    htmlContent,
-  );
-  if (docspace) await setTranscriptUrl(ticket.id, docspace.webUrl).catch(console.error);
+  // Per-ticket DocSpace folder: PDF transcript (with internals) + user attachments.
+  // Canonical archive; folder link is staff-only. No-op if DocSpace isn't configured.
+  let folderUrl: string | null = null;
+  const folder = await createTicketFolder(`Ticket #${ticket.ticket_number} — ${openerTag}`);
+  if (folder) {
+    folderUrl = folder.webUrl;
+    const staffPdf = await generateTranscriptPdf({
+      ticket: closedTicket, messages: transcriptMessages, notes,
+      openedByTag: openerTag, agentTag, guildName: guild.name, includeInternal: true,
+    }).catch(() => null);
+    if (staffPdf) {
+      await uploadBufferToFolder(folder.folderId, `ticket-${ticket.ticket_number}-transcript.pdf`, staffPdf, 'application/pdf');
+    }
+    // Relay every user attachment into the same folder
+    for (const m of transcriptMessages) {
+      for (const a of m.attachments) {
+        await uploadUrlToFolder(folder.folderId, a.url, a.name);
+      }
+    }
+    await setTranscriptUrl(ticket.id, folderUrl).catch(console.error);
+  }
 
-  // Staff transcript (with internal notes) → log channel
+  // Staff transcript (HTML, with internal notes) → log channel for a quick view
   const staffFile = new AttachmentBuilder(Buffer.from(htmlContent, 'utf-8'), {
     name: `transcript-ticket-${ticket.ticket_number}.html`,
   });
   const closeEmbed = ticketCloseEmbed(member.user, closedTicket, transcriptMessages.length);
-  if (docspace) {
-    closeEmbed.addFields({ name: '📄 Transcript (DocSpace)', value: `[Open in DocSpace](${docspace.webUrl})` });
+  if (folderUrl) {
+    closeEmbed.addFields({ name: '📁 Transcript folder (DocSpace)', value: `[Open in DocSpace](${folderUrl})` });
   }
   await logToChannel(interaction.client, guild.id, closeEmbed, staffFile);
 
