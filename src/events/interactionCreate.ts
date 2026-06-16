@@ -20,10 +20,14 @@ import {
 } from '../handlers/ticketHandler';
 import { errorEmbed } from '../utils/embeds';
 import { isSupportMember } from '../utils/permissions';
+import { autoDismiss } from '../utils/interactions';
 import { Command } from '../types';
 
 export const name = 'interactionCreate';
 export const once = false;
+
+// Commands whose ephemeral output the user reads — don't auto-dismiss these
+const KEEP_EPHEMERAL = new Set(['ticket-info', 'stats', 'usernote', 'config']);
 
 export async function execute(interaction: Interaction): Promise<void> {
   // ── Slash commands ─────────────────────────────────────────────────────────
@@ -36,6 +40,9 @@ export async function execute(interaction: Interaction): Promise<void> {
 
     try {
       await command.execute(interaction);
+      if (interaction.ephemeral && !KEEP_EPHEMERAL.has(interaction.commandName)) {
+        autoDismiss(interaction);
+      }
     } catch (err) {
       console.error(`Error in /${interaction.commandName}:`, err);
       const payload = { content: '❌ An unexpected error occurred.', ephemeral: true };
@@ -67,6 +74,7 @@ export async function execute(interaction: Interaction): Promise<void> {
         const config = await ensureServerConfig(modal.guildId!);
         await handlePanelReopen(modal, config);
       }
+      if (modal.ephemeral) autoDismiss(modal);
     } catch (err) {
       console.error(`[modal] ${modal.customId} error:`, err);
       const payload = { content: '❌ Something went wrong. Please try again.', ephemeral: true };
@@ -159,6 +167,7 @@ export async function execute(interaction: Interaction): Promise<void> {
     default:
       break;
   }
+  if (btn.ephemeral) autoDismiss(btn);
   } catch (err) {
     console.error(`[button] ${btn.customId} error:`, err);
     const payload = { content: '❌ Something went wrong. Please try again.', ephemeral: true as const };
