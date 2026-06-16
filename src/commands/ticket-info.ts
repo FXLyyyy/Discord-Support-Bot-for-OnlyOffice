@@ -1,6 +1,7 @@
 import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder, Colors, TextChannel, GuildMember } from 'discord.js';
 import { getTicketByChannel } from '../db/tickets';
 import { countTicketNotes, countUserInternalNotes } from '../db/notes';
+import { getUserNotes } from '../db/userNotes';
 import { getServerConfig } from '../db/servers';
 import { errorEmbed } from '../utils/embeds';
 import { isSupportMember } from '../utils/permissions';
@@ -61,21 +62,29 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
   }
 
   // Internal-note indicators
-  const [ticketNotes, userNotes] = await Promise.all([
+  const [ticketNotes, crossNotes, profileNotes] = await Promise.all([
     countTicketNotes(ticket.id),
     countUserInternalNotes(interaction.guildId!, ticket.user_id),
+    getUserNotes(interaction.guildId!, ticket.user_id),
   ]);
   fields.push({
     name: '🗒️ Internal notes',
     value: ticketNotes > 0 ? `${ticketNotes} in this ticket` : 'None in this ticket',
     inline: true,
   });
-  if (userNotes > ticketNotes) {
+  if (crossNotes > ticketNotes) {
     fields.push({
       name: '⚠️ This user',
-      value: `Has **${userNotes}** internal note(s) across their tickets`,
+      value: `Has **${crossNotes}** internal note(s) across their tickets`,
       inline: true,
     });
+  }
+  if (profileNotes.length > 0) {
+    const text = profileNotes
+      .slice(0, 8)
+      .map(n => `• ${n.note.length > 120 ? `${n.note.slice(0, 120)}…` : n.note}`)
+      .join('\n');
+    fields.push({ name: '📌 User notes', value: text.slice(0, 1024), inline: false });
   }
 
   const embed = new EmbedBuilder()

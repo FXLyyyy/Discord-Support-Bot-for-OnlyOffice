@@ -38,6 +38,7 @@ import {
   setTranscriptUrl,
 } from '../db/tickets';
 import { getTicketNotes } from '../db/notes';
+import { getUserNotes } from '../db/userNotes';
 import { saveTranscript } from '../db/transcripts';
 import {
   ticketWelcomeEmbed,
@@ -373,39 +374,54 @@ export async function handleTicketModal(
 
   await postTicketIntro(channel, member.user, config, ticketNumber, subject, description);
 
-  // Returning-user briefing: list past tickets + their internal notes for staff
-  const pastTickets = await getUserPastTickets(guild.id, member.id, newTicket.id).catch(() => []);
+  // Staff briefing: persistent user notes + past tickets + their internal notes
+  const [pastTickets, userNotes] = await Promise.all([
+    getUserPastTickets(guild.id, member.id, newTicket.id).catch(() => []),
+    getUserNotes(guild.id, member.id).catch(() => []),
+  ]);
 
-  if (pastTickets.length > 0) {
-    const shown = pastTickets.slice(0, 8);
-    const notesByTicket = await Promise.all(shown.map(t => getTicketNotes(t.id).catch(() => [])));
+  if (pastTickets.length > 0 || userNotes.length > 0) {
+    const sections: string[] = [];
 
-    const lines = shown.map((t, i) => {
-      const link = t.transcript_url ? ` — [transcript](${t.transcript_url})` : '';
-      const state = t.status === 'closed' ? '' : ' *(open)*';
-      const badge = notesByTicket[i].length ? ` — 🗒️ **${notesByTicket[i].length}**` : '';
-      return `• **#${t.ticket_number}** — "${t.subject}"${state}${link}${badge}`;
-    });
-    if (pastTickets.length > shown.length) lines.push(`…and ${pastTickets.length - shown.length} more`);
+    // Persistent profile notes about the user (e.g. "Uses Ubuntu")
+    if (userNotes.length > 0) {
+      const noteLines = userNotes.slice(0, 12).map(n => {
+        const text = n.note.length > 200 ? `${n.note.slice(0, 200)}…` : n.note;
+        return `> ${text} *(— ${n.author_tag})*`;
+      });
+      sections.push(`**📌 User notes:**\n${noteLines.join('\n')}`);
+    }
 
-    // Pull the actual internal notes inline (truncated), grouped by ticket
-    const noteBlocks: string[] = [];
-    shown.forEach((t, i) => {
-      for (const n of notesByTicket[i]) {
-        const text = n.note.length > 160 ? `${n.note.slice(0, 160)}…` : n.note;
-        noteBlocks.push(`> **#${t.ticket_number}** · *${n.author_tag}*: ${text}`);
-      }
-    });
-    const notesSection = noteBlocks.length
-      ? `\n\n**🗒️ Internal notes from past tickets:**\n${noteBlocks.slice(0, 12).join('\n')}`
-      : '';
+    // Past tickets with their per-ticket internal notes
+    if (pastTickets.length > 0) {
+      const shown = pastTickets.slice(0, 8);
+      const notesByTicket = await Promise.all(shown.map(t => getTicketNotes(t.id).catch(() => [])));
+
+      const lines = shown.map((t, i) => {
+        const link = t.transcript_url ? ` — [transcript](${t.transcript_url})` : '';
+        const state = t.status === 'closed' ? '' : ' *(open)*';
+        const badge = notesByTicket[i].length ? ` — 🗒️ **${notesByTicket[i].length}**` : '';
+        return `• **#${t.ticket_number}** — "${t.subject}"${state}${link}${badge}`;
+      });
+      if (pastTickets.length > shown.length) lines.push(`…and ${pastTickets.length - shown.length} more`);
+
+      const noteBlocks: string[] = [];
+      shown.forEach((t, i) => {
+        for (const n of notesByTicket[i]) {
+          const text = n.note.length > 160 ? `${n.note.slice(0, 160)}…` : n.note;
+          noteBlocks.push(`> **#${t.ticket_number}** · *${n.author_tag}*: ${text}`);
+        }
+      });
+
+      let block = `**Previous tickets (${pastTickets.length}):**\n${lines.join('\n')}`;
+      if (noteBlocks.length) block += `\n\n**🗒️ Internal notes from past tickets:**\n${noteBlocks.slice(0, 10).join('\n')}`;
+      sections.push(block);
+    }
 
     const thread = await ensureStaffThread(channel, config, ticketNumber);
     await thread
       ?.send({
-        content:
-          `🔁 **Returning user.** <@${member.id}> has contacted us before — ` +
-          `**${pastTickets.length}** previous ticket(s):\n${lines.join('\n')}${notesSection}`,
+        content: `🔁 **Returning user briefing — <@${member.id}>**\n\n${sections.join('\n\n')}`,
         // Ping support roles so the (otherwise collapsed) staff thread surfaces
         allowedMentions: { roles: config.support_role_ids },
       })
