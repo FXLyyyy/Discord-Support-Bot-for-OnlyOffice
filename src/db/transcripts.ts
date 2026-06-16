@@ -1,4 +1,4 @@
-import { supabase } from './client';
+import { q, one } from './client';
 import { Transcript, TicketMessage } from '../types';
 
 export async function saveTranscript(params: {
@@ -6,27 +6,16 @@ export async function saveTranscript(params: {
   guildId: string;
   messages: TicketMessage[];
 }): Promise<Transcript> {
-  const { data, error } = await supabase
-    .from('transcripts')
-    .insert({
-      ticket_id: params.ticketId,
-      guild_id: params.guildId,
-      messages: params.messages,
-    })
-    .select()
-    .single();
-
-  if (error) throw error;
-  return data as Transcript;
+  return (await one<Transcript>(
+    `INSERT INTO transcripts (ticket_id, guild_id, messages)
+     VALUES ($1, $2, $3::jsonb) RETURNING *`,
+    [params.ticketId, params.guildId, JSON.stringify(params.messages)]
+  ))!;
 }
 
 export async function getTranscript(ticketId: string): Promise<Transcript | null> {
-  const { data, error } = await supabase
-    .from('transcripts')
-    .select('*')
-    .eq('ticket_id', ticketId)
-    .single();
-
-  if (error) return null;
-  return data as Transcript;
+  return one<Transcript>(
+    'SELECT * FROM transcripts WHERE ticket_id = $1 ORDER BY created_at DESC LIMIT 1',
+    [ticketId]
+  );
 }

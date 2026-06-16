@@ -1,0 +1,9 @@
+node_modules
+dist
+logs
+.git
+.env
+*.md
+.DS_Store
+migrations
+Test-Plan.docx

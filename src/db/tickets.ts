@@ -1,4 +1,4 @@
-import { supabase } from './client';
+import { q, one } from './client';
 import { Ticket, TicketStatus, TicketMessage, TicketStats } from '../types';
 
 export async function createTicket(params: {
@@ -9,50 +9,33 @@ export async function createTicket(params: {
   subject: string;
   description: string;
 }): Promise<Ticket> {
-  const { data, error } = await supabase
-    .from('tickets')
-    .insert({
-      guild_id: params.guildId,
-      channel_id: params.channelId,
-      user_id: params.userId,
-      ticket_number: params.ticketNumber,
-      subject: params.subject,
-      description: params.description,
-      status: 'open',
-    })
-    .select()
-    .single();
-
-  if (error) throw error;
-  return data as Ticket;
+  return (await one<Ticket>(
+    `INSERT INTO tickets (guild_id, channel_id, user_id, ticket_number, subject, description, status)
+     VALUES ($1, $2, $3, $4, $5, $6, 'open') RETURNING *`,
+    [params.guildId, params.channelId, params.userId, params.ticketNumber, params.subject, params.description]
+  ))!;
 }
 
 export async function getTicketByChannel(channelId: string): Promise<Ticket | null> {
-  const { data, error } = await supabase
-    .from('tickets')
-    .select('*')
-    .eq('channel_id', channelId)
-    .single();
+  return one<Ticket>('SELECT * FROM tickets WHERE channel_id = $1', [channelId]);
+}
 
-  if (error) return null;
-  return data as Ticket;
+export async function getTicketByNumber(guildId: string, ticketNumber: number): Promise<Ticket | null> {
+  return one<Ticket>('SELECT * FROM tickets WHERE guild_id = $1 AND ticket_number = $2', [guildId, ticketNumber]);
 }
 
 export async function getNextTicketNumber(guildId: string): Promise<number> {
-  // Atomic increment via Postgres function (no race between concurrent opens)
-  const { data, error } = await supabase.rpc('next_ticket_number', { g_id: guildId });
-  if (!error && typeof data === 'number') return data;
-
-  // Fallback (e.g. migration not yet applied): non-atomic max + 1
-  const { data: rows } = await supabase
-    .from('tickets')
-    .select('ticket_number')
-    .eq('guild_id', guildId)
-    .order('ticket_number', { ascending: false })
-    .limit(1);
-
-  if (!rows || rows.length === 0) return 1;
-  return (rows[0].ticket_number as number) + 1;
+  try {
+    const row = await one<{ n: number }>('SELECT next_ticket_number($1) AS n', [guildId]);
+    if (row && typeof row.n === 'number') return row.n;
+  } catch (err) {
+    console.error('[tickets] next_ticket_number failed, falling back:', err);
+  }
+  const row = await one<{ n: number }>(
+    'SELECT COALESCE(MAX(ticket_number), 0) + 1 AS n FROM tickets WHERE guild_id = $1',
+    [guildId]
+  );
+  return row?.n ?? 1;
 }
 
 export async function updateTicketStatus(
@@ -61,285 +44,177 @@ export async function updateTicketStatus(
   agentId?: string,
   extra?: { closeReason?: string | null; resolution?: string | null }
 ): Promise<Ticket> {
-  const base: Record<string, unknown> = { status };
-  if (agentId !== undefined) base.agent_id = agentId;
-  if (status === 'closed') base.closed_at = new Date().toISOString();
+  const sets = ['status = $2'];
+  const params: unknown[] = [ticketId, status];
+  let pos = 3;
 
-  const full = { ...base };
-  if (extra?.closeReason !== undefined) full.close_reason = extra.closeReason;
-  if (extra?.resolution !== undefined) full.resolution = extra.resolution;
+  if (agentId !== undefined) { sets.push(`agent_id = $${pos++}`); params.push(agentId); }
+  if (status === 'closed') sets.push('closed_at = NOW()');
+  if (extra?.closeReason !== undefined) { sets.push(`close_reason = $${pos++}`); params.push(extra.closeReason); }
+  if (extra?.resolution !== undefined) { sets.push(`resolution = $${pos++}`); params.push(extra.resolution); }
 
-  let { data, error } = await supabase
-    .from('tickets').update(full).eq('id', ticketId).select().single();
-
-  // Migration 004 not applied yet (close_reason/resolution columns missing):
-  // retry with the base fields so closing still works.
-  if (error && full !== base && Object.keys(full).length > Object.keys(base).length) {
-    console.warn('[tickets] close columns missing, retrying without them (run migration 004):', error.message);
-    ({ data, error } = await supabase
-      .from('tickets').update(base).eq('id', ticketId).select().single());
-  }
-
-  if (error) throw error;
-  return data as Ticket;
+  return (await one<Ticket>(
+    `UPDATE tickets SET ${sets.join(', ')} WHERE id = $1 RETURNING *`,
+    params
+  ))!;
 }
 
-export async function getTicketByNumber(
-  guildId: string,
-  ticketNumber: number
-): Promise<Ticket | null> {
-  const { data } = await supabase
-    .from('tickets')
-    .select('*')
-    .eq('guild_id', guildId)
-    .eq('ticket_number', ticketNumber)
-    .limit(1);
-
-  return data && data.length > 0 ? (data[0] as Ticket) : null;
-}
-
-export async function reopenTicketRecord(
-  ticketId: string,
-  newChannelId: string
-): Promise<Ticket> {
-  const { data, error } = await supabase
-    .from('tickets')
-    .update({
-      status: 'open',
-      channel_id: newChannelId,
-      closed_at: null,
-      close_reason: null,
-      resolution: null,
-      last_activity_at: new Date().toISOString(),
-      inactivity_warned_at: null,
-      first_response_at: null,
-    })
-    .eq('id', ticketId)
-    .select()
-    .single();
-
-  if (error) throw error;
-  return data as Ticket;
-}
-
-export async function setTranscriptUrl(ticketId: string, url: string): Promise<void> {
-  await supabase.from('tickets').update({ transcript_url: url }).eq('id', ticketId);
-}
-
-// Sets first_response_at only if it hasn't been set yet
-export async function markFirstResponse(ticketId: string): Promise<void> {
-  await supabase
-    .from('tickets')
-    .update({ first_response_at: new Date().toISOString() })
-    .eq('id', ticketId)
-    .is('first_response_at', null);
-}
-
-// Archived tickets whose channel is older than the retention window and still exists
-export async function getArchivedTicketsToDelete(retentionDays: number): Promise<Ticket[]> {
-  const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000).toISOString();
-  const { data } = await supabase
-    .from('tickets')
-    .select('*')
-    .eq('status', 'closed')
-    .not('channel_id', 'is', null)
-    .lt('closed_at', cutoff);
-
-  return (data ?? []) as Ticket[];
-}
-
-// Marks a ticket's channel as physically removed (channel_id null = "cleaned up")
-export async function markChannelDeleted(ticketId: string): Promise<void> {
-  await supabase.from('tickets').update({ channel_id: null }).eq('id', ticketId);
+export async function reopenTicketRecord(ticketId: string, newChannelId: string): Promise<Ticket> {
+  return (await one<Ticket>(
+    `UPDATE tickets
+       SET status = 'open', channel_id = $2, closed_at = NULL, close_reason = NULL,
+           resolution = NULL, last_activity_at = NOW(), inactivity_warned_at = NULL, first_response_at = NULL
+     WHERE id = $1 RETURNING *`,
+    [ticketId, newChannelId]
+  ))!;
 }
 
 export async function hasOpenTicket(guildId: string, userId: string): Promise<boolean> {
-  const { data } = await supabase
-    .from('tickets')
-    .select('id')
-    .eq('guild_id', guildId)
-    .eq('user_id', userId)
-    .in('status', ['open', 'claimed'])
-    .limit(1);
-
-  return !!(data && data.length > 0);
+  const row = await one(
+    `SELECT 1 FROM tickets WHERE guild_id = $1 AND user_id = $2 AND status IN ('open','claimed') LIMIT 1`,
+    [guildId, userId]
+  );
+  return !!row;
 }
 
-// Returns the user's earlier tickets (most recent first), excluding one id.
+export async function getOpenTicketForUser(guildId: string, userId: string): Promise<Ticket | null> {
+  return one<Ticket>(
+    `SELECT * FROM tickets WHERE guild_id = $1 AND user_id = $2 AND status IN ('open','claimed')
+     ORDER BY created_at DESC LIMIT 1`,
+    [guildId, userId]
+  );
+}
+
 export async function getUserPastTickets(
   guildId: string,
   userId: string,
   excludeTicketId?: string
 ): Promise<Ticket[]> {
-  let query = supabase
-    .from('tickets')
-    .select('*')
-    .eq('guild_id', guildId)
-    .eq('user_id', userId)
-    .order('ticket_number', { ascending: false });
-
-  if (excludeTicketId) query = query.neq('id', excludeTicketId);
-
-  const { data } = await query;
-  return (data ?? []) as Ticket[];
-}
-
-// Returns the user's current live (open or claimed) ticket, if any.
-export async function getOpenTicketForUser(
-  guildId: string,
-  userId: string
-): Promise<Ticket | null> {
-  const { data } = await supabase
-    .from('tickets')
-    .select('*')
-    .eq('guild_id', guildId)
-    .eq('user_id', userId)
-    .in('status', ['open', 'claimed'])
-    .order('created_at', { ascending: false })
-    .limit(1);
-
-  return data && data.length > 0 ? (data[0] as Ticket) : null;
+  if (excludeTicketId) {
+    return q<Ticket>(
+      `SELECT * FROM tickets WHERE guild_id = $1 AND user_id = $2 AND id <> $3 ORDER BY ticket_number DESC`,
+      [guildId, userId, excludeTicketId]
+    );
+  }
+  return q<Ticket>(
+    `SELECT * FROM tickets WHERE guild_id = $1 AND user_id = $2 ORDER BY ticket_number DESC`,
+    [guildId, userId]
+  );
 }
 
 export async function getTicketMessages(ticketId: string): Promise<TicketMessage[]> {
-  const { data, error } = await supabase
-    .from('ticket_messages')
-    .select('*')
-    .eq('ticket_id', ticketId)
-    .order('created_at', { ascending: true });
-
-  if (error) return [];
-  return data as TicketMessage[];
+  return q<TicketMessage>(
+    'SELECT * FROM ticket_messages WHERE ticket_id = $1 ORDER BY created_at ASC',
+    [ticketId]
+  );
 }
 
 export async function updateLastActivity(channelId: string): Promise<void> {
-  await supabase
-    .from('tickets')
-    .update({ last_activity_at: new Date().toISOString(), inactivity_warned_at: null })
-    .eq('channel_id', channelId)
-    .in('status', ['open', 'claimed']);
+  await q(
+    `UPDATE tickets SET last_activity_at = NOW(), inactivity_warned_at = NULL
+     WHERE channel_id = $1 AND status IN ('open','claimed')`,
+    [channelId]
+  );
 }
 
 export async function markInactivityWarned(ticketId: string): Promise<void> {
-  await supabase
-    .from('tickets')
-    .update({ inactivity_warned_at: new Date().toISOString() })
-    .eq('id', ticketId);
+  await q('UPDATE tickets SET inactivity_warned_at = NOW() WHERE id = $1', [ticketId]);
 }
 
-export async function saveRating(
-  ticketId: string,
-  rating: number,
-  ratedByUserId?: string
-): Promise<void> {
-  // Keep the latest rating on the ticket (used by /stats averages)
-  await supabase
-    .from('tickets')
-    .update({ rating, rated_at: new Date().toISOString() })
-    .eq('id', ticketId);
+export async function saveRating(ticketId: string, rating: number, ratedByUserId?: string): Promise<void> {
+  await q('UPDATE tickets SET rating = $2, rated_at = NOW() WHERE id = $1', [ticketId, rating]);
 
-  // Also log it in the dedicated ratings table
-  const { data } = await supabase
-    .from('tickets')
-    .select('guild_id, ticket_number, user_id')
-    .eq('id', ticketId)
-    .single();
-
-  if (data) {
-    await supabase.from('ticket_ratings').insert({
-      ticket_id: ticketId,
-      guild_id: data.guild_id,
-      ticket_number: data.ticket_number,
-      rated_by: ratedByUserId ?? data.user_id,
-      rating,
-    });
+  const t = await one<{ guild_id: string; ticket_number: number; user_id: string }>(
+    'SELECT guild_id, ticket_number, user_id FROM tickets WHERE id = $1',
+    [ticketId]
+  );
+  if (t) {
+    await q(
+      `INSERT INTO ticket_ratings (ticket_id, guild_id, ticket_number, rated_by, rating)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [ticketId, t.guild_id, t.ticket_number, ratedByUserId ?? t.user_id, rating]
+    );
   }
 }
 
-export async function getTicketsForInactivityCheck(): Promise<{
-  toWarn: Ticket[];
-  toClose: Ticket[];
-}> {
-  const now = new Date();
-  const warn24h = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
-  const close48h = new Date(now.getTime() - 48 * 60 * 60 * 1000).toISOString();
+export async function setTranscriptUrl(ticketId: string, url: string): Promise<void> {
+  await q('UPDATE tickets SET transcript_url = $2 WHERE id = $1', [ticketId, url]);
+}
 
-  const { data: toClose } = await supabase
-    .from('tickets')
-    .select('*')
-    .in('status', ['open', 'claimed'])
-    .not('inactivity_warned_at', 'is', null)
-    .lt('last_activity_at', close48h);
+export async function markFirstResponse(ticketId: string): Promise<void> {
+  await q('UPDATE tickets SET first_response_at = NOW() WHERE id = $1 AND first_response_at IS NULL', [ticketId]);
+}
 
-  const { data: toWarn } = await supabase
-    .from('tickets')
-    .select('*')
-    .in('status', ['open', 'claimed'])
-    .is('inactivity_warned_at', null)
-    .lt('last_activity_at', warn24h);
+export async function getArchivedTicketsToDelete(retentionDays: number): Promise<Ticket[]> {
+  const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000).toISOString();
+  return q<Ticket>(
+    `SELECT * FROM tickets WHERE status = 'closed' AND channel_id IS NOT NULL AND closed_at < $1`,
+    [cutoff]
+  );
+}
 
-  return {
-    toClose: (toClose ?? []) as Ticket[],
-    toWarn: (toWarn ?? []) as Ticket[],
-  };
+export async function markChannelDeleted(ticketId: string): Promise<void> {
+  await q('UPDATE tickets SET channel_id = NULL WHERE id = $1', [ticketId]);
+}
+
+export async function getTicketsForInactivityCheck(): Promise<{ toWarn: Ticket[]; toClose: Ticket[] }> {
+  const warn24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const close48h = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+
+  const toClose = await q<Ticket>(
+    `SELECT * FROM tickets WHERE status IN ('open','claimed')
+       AND inactivity_warned_at IS NOT NULL AND last_activity_at < $1`,
+    [close48h]
+  );
+  const toWarn = await q<Ticket>(
+    `SELECT * FROM tickets WHERE status IN ('open','claimed')
+       AND inactivity_warned_at IS NULL AND last_activity_at < $1`,
+    [warn24h]
+  );
+  return { toWarn, toClose };
 }
 
 export async function getTicketStats(guildId: string): Promise<TicketStats> {
-  const { count: total } = await supabase
-    .from('tickets')
-    .select('*', { count: 'exact', head: true })
-    .eq('guild_id', guildId);
-
-  const { count: open } = await supabase
-    .from('tickets')
-    .select('*', { count: 'exact', head: true })
-    .eq('guild_id', guildId)
-    .in('status', ['open', 'claimed']);
+  const total = (await one<{ c: number }>('SELECT COUNT(*)::int AS c FROM tickets WHERE guild_id = $1', [guildId]))?.c ?? 0;
+  const open = (await one<{ c: number }>(
+    `SELECT COUNT(*)::int AS c FROM tickets WHERE guild_id = $1 AND status IN ('open','claimed')`, [guildId]
+  ))?.c ?? 0;
 
   const monthStart = new Date();
   monthStart.setDate(1);
   monthStart.setHours(0, 0, 0, 0);
 
-  const { count: closedThisMonth } = await supabase
-    .from('tickets')
-    .select('*', { count: 'exact', head: true })
-    .eq('guild_id', guildId)
-    .eq('status', 'closed')
-    .gte('closed_at', monthStart.toISOString());
+  const closedThisMonth = (await one<{ c: number }>(
+    `SELECT COUNT(*)::int AS c FROM tickets WHERE guild_id = $1 AND status = 'closed' AND closed_at >= $2`,
+    [guildId, monthStart.toISOString()]
+  ))?.c ?? 0;
 
-  const { data: closedTickets } = await supabase
-    .from('tickets')
-    .select('created_at, closed_at, first_response_at, agent_id, rating')
-    .eq('guild_id', guildId)
-    .eq('status', 'closed')
-    .not('closed_at', 'is', null)
-    .order('closed_at', { ascending: false })
-    .limit(200);
+  const closedTickets = await q<{
+    created_at: string; closed_at: string | null; first_response_at: string | null;
+    agent_id: string | null; rating: number | null;
+  }>(
+    `SELECT created_at, closed_at, first_response_at, agent_id, rating FROM tickets
+       WHERE guild_id = $1 AND status = 'closed' AND closed_at IS NOT NULL
+       ORDER BY closed_at DESC LIMIT 200`,
+    [guildId]
+  );
 
-  let avgCloseHours = 0;
-  let avgFirstResponseHours = 0;
-  let firstResponseCount = 0;
-  let avgRating = 0;
-  let ratedCount = 0;
+  let avgCloseHours = 0, avgFirstResponseHours = 0, firstResponseCount = 0, avgRating = 0, ratedCount = 0;
   const agentCounts: Record<string, number> = {};
 
-  for (const t of closedTickets ?? []) {
+  for (const t of closedTickets) {
     if (t.closed_at) {
-      avgCloseHours +=
-        (new Date(t.closed_at).getTime() - new Date(t.created_at).getTime()) /
-        (1000 * 60 * 60);
+      avgCloseHours += (new Date(t.closed_at).getTime() - new Date(t.created_at).getTime()) / 3_600_000;
     }
     if (t.first_response_at) {
-      avgFirstResponseHours +=
-        (new Date(t.first_response_at).getTime() - new Date(t.created_at).getTime()) /
-        (1000 * 60 * 60);
+      avgFirstResponseHours += (new Date(t.first_response_at).getTime() - new Date(t.created_at).getTime()) / 3_600_000;
       firstResponseCount++;
     }
     if (t.agent_id) agentCounts[t.agent_id] = (agentCounts[t.agent_id] ?? 0) + 1;
     if (t.rating) { avgRating += t.rating; ratedCount++; }
   }
 
-  const n = closedTickets?.length ?? 0;
+  const n = closedTickets.length;
   avgCloseHours = n > 0 ? avgCloseHours / n : 0;
   avgFirstResponseHours = firstResponseCount > 0 ? avgFirstResponseHours / firstResponseCount : 0;
   avgRating = ratedCount > 0 ? avgRating / ratedCount : 0;
@@ -349,15 +224,5 @@ export async function getTicketStats(guildId: string): Promise<TicketStats> {
     .slice(0, 3)
     .map(([agentId, count]) => ({ agentId, count }));
 
-  return {
-    total: total ?? 0,
-    open: open ?? 0,
-    closedThisMonth: closedThisMonth ?? 0,
-    avgCloseHours,
-    avgFirstResponseHours,
-    firstResponseCount,
-    avgRating,
-    ratedCount,
-    topAgents,
-  };
+  return { total, open, closedThisMonth, avgCloseHours, avgFirstResponseHours, firstResponseCount, avgRating, ratedCount, topAgents };
 }

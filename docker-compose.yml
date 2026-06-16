@@ -1,0 +1,42 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Schema is applied automatically on the FIRST boot (empty data volume)
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # No `ports:` — the database is only reachable on the internal network.
+
+  bot:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      DISCORD_TOKEN: ${DISCORD_TOKEN}
+      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID}
+      DISCORD_GUILD_ID: ${DISCORD_GUILD_ID:-}
+      DOCSPACE_BASE_URL: ${DOCSPACE_BASE_URL:-}
+      DOCSPACE_API_KEY: ${DOCSPACE_API_KEY:-}
+      DOCSPACE_TRANSCRIPTS_FOLDER_ID: ${DOCSPACE_TRANSCRIPTS_FOLDER_ID:-}
+      # If your server sits behind a TLS-inspecting proxy, mount the corporate
+      # root CA and uncomment the next line (see DEPLOY.md):
+      # NODE_EXTRA_CA_CERTS: /certs/corp-root-ca.pem
+    volumes:
+      - ./logs:/app/logs
+      # - ./certs:/certs:ro   # uncomment alongside NODE_EXTRA_CA_CERTS above
+
+volumes:
+  pgdata:

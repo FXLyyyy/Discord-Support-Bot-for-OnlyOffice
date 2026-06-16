@@ -1,5 +1,5 @@
 import './utils/fileLogger'; // must be first — patches console + captures crashes
-import { Client, GatewayIntentBits, Partials, Collection } from 'discord.js';
+import { Client, GatewayIntentBits, Partials, Collection, REST, Routes } from 'discord.js';
 import { config } from 'dotenv';
 import { readdirSync } from 'fs';
 import { join } from 'path';
@@ -48,7 +48,33 @@ for (const file of readdirSync(commandsPath).filter(f => f.match(/\.[jt]s$/))) {
   }
 }
 
-client.once('ready', () => {
+// Register slash commands with Discord. Guild-scoped if DISCORD_GUILD_ID is set
+// (instant), otherwise global. Idempotent — safe to run on every startup.
+async function registerCommands(): Promise<void> {
+  const clientId = process.env.DISCORD_CLIENT_ID;
+  if (!clientId) {
+    console.warn('[commands] DISCORD_CLIENT_ID not set — skipping command registration');
+    return;
+  }
+  const body = [...client.commands.values()].map(c => c.data.toJSON());
+  const rest = new REST().setToken(process.env.DISCORD_TOKEN!);
+  const guildId = process.env.DISCORD_GUILD_ID;
+  try {
+    if (guildId) {
+      await rest.put(Routes.applicationGuildCommands(clientId, guildId), { body });
+      console.log(`[commands] Registered ${body.length} commands to guild ${guildId}`);
+    } else {
+      await rest.put(Routes.applicationCommands(clientId), { body });
+      console.log(`[commands] Registered ${body.length} commands globally`);
+    }
+  } catch (err) {
+    console.error('[commands] Failed to register commands:', err);
+  }
+}
+
+client.once('ready', async () => {
+  await registerCommands();
+
   // Run inactivity check every 30 minutes
   setInterval(() => {
     checkInactiveTickets(client).catch(console.error);
@@ -60,6 +86,8 @@ client.once('ready', () => {
     cleanupArchivedTickets(client).catch(console.error);
   }, 24 * 60 * 60 * 1000);
   console.log(`[cleanup] Archived-ticket cleanup scheduled daily`);
+
+  console.log(`[bot] Logged in as ${client.user?.tag}`);
 });
 
 client.login(process.env.DISCORD_TOKEN);

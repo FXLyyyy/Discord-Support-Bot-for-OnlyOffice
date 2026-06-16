@@ -9,7 +9,7 @@ import {
 } from 'discord.js';
 import { panelEmbed, errorEmbed } from '../utils/embeds';
 import { ensureServerConfig } from '../db/servers';
-import { supabase } from '../db/client';
+import { q } from '../db/client';
 
 export const data = new SlashCommandBuilder()
   .setName('ticket-panel')
@@ -68,11 +68,10 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     components: [row],
   });
 
-  await supabase.from('panels').insert({
-    guild_id: interaction.guildId!,
-    channel_id: interaction.channelId,
-    message_id: message.id,
-  });
+  await q(
+    'INSERT INTO panels (guild_id, channel_id, message_id) VALUES ($1, $2, $3)',
+    [interaction.guildId!, interaction.channelId, message.id]
+  );
 
   await interaction.reply({ embeds: [{ description: '✅ Panel created!', color: 0x00b300 }], ephemeral: true });
 }

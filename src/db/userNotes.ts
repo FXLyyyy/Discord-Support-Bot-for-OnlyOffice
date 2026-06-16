@@ -1,4 +1,4 @@
-import { supabase } from './client';
+import { q, one } from './client';
 
 export interface UserNote {
   id: string;
@@ -17,32 +17,18 @@ export async function addUserNote(params: {
   authorTag: string;
   note: string;
 }): Promise<UserNote> {
-  const { data, error } = await supabase
-    .from('user_notes')
-    .insert({
-      guild_id: params.guildId,
-      user_id: params.userId,
-      author_id: params.authorId,
-      author_tag: params.authorTag,
-      note: params.note,
-    })
-    .select()
-    .single();
-
-  if (error) throw error;
-  return data as UserNote;
+  return (await one<UserNote>(
+    `INSERT INTO user_notes (guild_id, user_id, author_id, author_tag, note)
+     VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+    [params.guildId, params.userId, params.authorId, params.authorTag, params.note]
+  ))!;
 }
 
 export async function getUserNotes(guildId: string, userId: string): Promise<UserNote[]> {
-  const { data, error } = await supabase
-    .from('user_notes')
-    .select('*')
-    .eq('guild_id', guildId)
-    .eq('user_id', userId)
-    .order('created_at', { ascending: true });
-
-  if (error) return [];
-  return (data ?? []) as UserNote[];
+  return q<UserNote>(
+    'SELECT * FROM user_notes WHERE guild_id = $1 AND user_id = $2 ORDER BY created_at ASC',
+    [guildId, userId]
+  );
 }
 
 // Deletes the note at the given 1-based position (as shown by /usernote list).
@@ -54,6 +40,6 @@ export async function deleteUserNoteAt(
   const notes = await getUserNotes(guildId, userId);
   const target = notes[position - 1];
   if (!target) return null;
-  await supabase.from('user_notes').delete().eq('id', target.id);
+  await q('DELETE FROM user_notes WHERE id = $1', [target.id]);
   return target;
 }
