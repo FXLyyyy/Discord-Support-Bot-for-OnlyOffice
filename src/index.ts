@@ -1,3 +1,4 @@
+import './utils/fileLogger'; // must be first — patches console + captures crashes
 import { Client, GatewayIntentBits, Partials, Collection } from 'discord.js';
 import { config } from 'dotenv';
 import { readdirSync } from 'fs';

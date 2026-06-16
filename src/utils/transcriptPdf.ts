@@ -70,13 +70,16 @@ export function generateTranscriptPdf(params: {
     doc.fontSize(10).font('Helvetica').fillColor(COLORS.ink)
       .text(ticket.description || '(no description)', { width: W });
 
-    // ── Resolution (+ internal reason for staff)
-    if (ticket.resolution || (includeInternal && ticket.close_reason)) {
+    // ── Resolution (shared with user)
+    if (ticket.resolution) {
       sectionLabel('Resolution', COLORS.green);
-      if (ticket.resolution) doc.fontSize(10).font('Helvetica').fillColor(COLORS.ink).text(ticket.resolution, { width: W });
-      if (includeInternal && ticket.close_reason) {
-        doc.fontSize(9).font('Helvetica-Oblique').fillColor(COLORS.muted).text(`Internal reason: ${ticket.close_reason}`, { width: W });
-      }
+      doc.fontSize(10).font('Helvetica').fillColor(COLORS.ink).text(ticket.resolution, { width: W });
+    }
+
+    // ── Internal close reason (staff PDF only)
+    if (includeInternal && ticket.close_reason) {
+      sectionLabel('Close reason (internal)', COLORS.amber);
+      doc.fontSize(10).font('Helvetica').fillColor(COLORS.ink).text(ticket.close_reason, { width: W });
     }
 
     // ── Internal notes (staff only)

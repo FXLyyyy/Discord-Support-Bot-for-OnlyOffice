@@ -37,7 +37,7 @@ import {
   getTicketByNumber,
   setTranscriptUrl,
 } from '../db/tickets';
-import { getTicketNotes, countUserInternalNotes } from '../db/notes';
+import { getTicketNotes } from '../db/notes';
 import { saveTranscript } from '../db/transcripts';
 import {
   ticketWelcomeEmbed,
@@ -188,6 +188,8 @@ async function findOrCreateArchiveCategory(guild: Guild): Promise<CategoryChanne
 }
 
 // Locks a ticket channel (read-only for the opener) and moves it to the archive.
+// NOTE: we deliberately do NOT rename the channel — Discord rate-limits renames
+// to 2 per 10 min, which left channels stuck as "closed-N" during rapid testing.
 export async function archiveTicketChannel(channel: TextChannel, guild: Guild, ticket: Ticket): Promise<void> {
   const archive = await findOrCreateArchiveCategory(guild);
   await channel.permissionOverwrites
@@ -196,22 +198,29 @@ export async function archiveTicketChannel(channel: TextChannel, guild: Guild, t
   if (archive) {
     await channel.setParent(archive.id, { lockPermissions: false }).catch(console.error);
   }
-  await channel.setName(`closed-${ticket.ticket_number}`).catch(console.error);
 }
 
-// Restores a previously archived channel back to an active ticket channel.
+// Restores a previously archived channel back to an active ticket channel,
+// re-granting the opener full write access.
 async function unarchiveTicketChannel(
   channel: TextChannel,
   config: ServerConfig,
   ticket: Ticket
 ): Promise<void> {
   await channel.permissionOverwrites
-    .edit(ticket.user_id, { SendMessages: true, ViewChannel: true, ReadMessageHistory: true })
+    .edit(ticket.user_id, {
+      ViewChannel: true,
+      SendMessages: true,
+      ReadMessageHistory: true,
+      AttachFiles: true,
+      EmbedLinks: true,
+      AddReactions: true,
+      UseApplicationCommands: true,
+    })
     .catch(console.error);
   await channel
     .setParent(config.ticket_category_id ?? null, { lockPermissions: false })
     .catch(console.error);
-  await channel.setName(`ticket-${ticket.ticket_number}`).catch(console.error);
 }
 
 // The Claim / Close action row shown on an active ticket.
@@ -301,9 +310,9 @@ export async function openTicket(
     new ActionRowBuilder<TextInputBuilder>().addComponents(
       new TextInputBuilder()
         .setCustomId('ticket_subject')
-        .setLabel('Subject')
+        .setLabel('Subject — a short summary')
         .setStyle(TextInputStyle.Short)
-        .setPlaceholder("e.g. Can't open a document")
+        .setPlaceholder("e.g. Can't open my .docx file in the editor")
         .setRequired(true)
         .setMaxLength(100)
     ),
@@ -312,7 +321,10 @@ export async function openTicket(
         .setCustomId('ticket_description')
         .setLabel('Describe your issue')
         .setStyle(TextInputStyle.Paragraph)
-        .setPlaceholder('Please provide as much detail as possible…')
+        .setPlaceholder(
+          'e.g. When I double-click my document the editor opens to a blank ' +
+          'screen and never loads. I\'m on version 8.1, Windows 11. It worked yesterday.'
+        )
         .setRequired(true)
         .setMaxLength(1000)
     )
@@ -361,22 +373,31 @@ export async function handleTicketModal(
 
   await postTicketIntro(channel, member.user, config, ticketNumber, subject, description);
 
-  // Returning-user briefing: list past tickets (with transcript links) for staff
-  const [pastTickets, priorNotes] = await Promise.all([
-    getUserPastTickets(guild.id, member.id, newTicket.id).catch(() => []),
-    countUserInternalNotes(guild.id, member.id).catch(() => 0),
-  ]);
+  // Returning-user briefing: list past tickets + their internal notes for staff
+  const pastTickets = await getUserPastTickets(guild.id, member.id, newTicket.id).catch(() => []);
 
   if (pastTickets.length > 0) {
-    const lines = pastTickets.slice(0, 10).map(t => {
+    const shown = pastTickets.slice(0, 8);
+    const notesByTicket = await Promise.all(shown.map(t => getTicketNotes(t.id).catch(() => [])));
+
+    const lines = shown.map((t, i) => {
       const link = t.transcript_url ? ` — [transcript](${t.transcript_url})` : '';
       const state = t.status === 'closed' ? '' : ' *(open)*';
-      return `• **#${t.ticket_number}** — "${t.subject}"${state}${link}`;
+      const badge = notesByTicket[i].length ? ` — 🗒️ **${notesByTicket[i].length}**` : '';
+      return `• **#${t.ticket_number}** — "${t.subject}"${state}${link}${badge}`;
     });
-    if (pastTickets.length > 10) lines.push(`…and ${pastTickets.length - 10} more`);
+    if (pastTickets.length > shown.length) lines.push(`…and ${pastTickets.length - shown.length} more`);
 
-    const noteLine = priorNotes > 0
-      ? `\nThey also have **${priorNotes}** internal note(s) on record.`
+    // Pull the actual internal notes inline (truncated), grouped by ticket
+    const noteBlocks: string[] = [];
+    shown.forEach((t, i) => {
+      for (const n of notesByTicket[i]) {
+        const text = n.note.length > 160 ? `${n.note.slice(0, 160)}…` : n.note;
+        noteBlocks.push(`> **#${t.ticket_number}** · *${n.author_tag}*: ${text}`);
+      }
+    });
+    const notesSection = noteBlocks.length
+      ? `\n\n**🗒️ Internal notes from past tickets:**\n${noteBlocks.slice(0, 12).join('\n')}`
       : '';
 
     const thread = await ensureStaffThread(channel, config, ticketNumber);
@@ -384,8 +405,9 @@ export async function handleTicketModal(
       ?.send({
         content:
           `🔁 **Returning user.** <@${member.id}> has contacted us before — ` +
-          `**${pastTickets.length}** previous ticket(s):\n${lines.join('\n')}${noteLine}`,
-        allowedMentions: { parse: [] },
+          `**${pastTickets.length}** previous ticket(s):\n${lines.join('\n')}${notesSection}`,
+        // Ping support roles so the (otherwise collapsed) staff thread surfaces
+        allowedMentions: { roles: config.support_role_ids },
       })
       .catch(() => null);
   }
