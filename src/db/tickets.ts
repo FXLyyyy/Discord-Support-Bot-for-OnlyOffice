@@ -63,18 +63,24 @@ export async function updateTicketStatus(
   agentId?: string,
   extra?: { closeReason?: string | null; resolution?: string | null }
 ): Promise<Ticket> {
-  const updates: Record<string, unknown> = { status };
-  if (agentId !== undefined) updates.agent_id = agentId;
-  if (status === 'closed') updates.closed_at = new Date().toISOString();
-  if (extra?.closeReason !== undefined) updates.close_reason = extra.closeReason;
-  if (extra?.resolution !== undefined) updates.resolution = extra.resolution;
+  const base: Record<string, unknown> = { status };
+  if (agentId !== undefined) base.agent_id = agentId;
+  if (status === 'closed') base.closed_at = new Date().toISOString();
 
-  const { data, error } = await supabase
-    .from('tickets')
-    .update(updates)
-    .eq('id', ticketId)
-    .select()
-    .single();
+  const full = { ...base };
+  if (extra?.closeReason !== undefined) full.close_reason = extra.closeReason;
+  if (extra?.resolution !== undefined) full.resolution = extra.resolution;
+
+  let { data, error } = await supabase
+    .from('tickets').update(full).eq('id', ticketId).select().single();
+
+  // Migration 004 not applied yet (close_reason/resolution columns missing):
+  // retry with the base fields so closing still works.
+  if (error && full !== base && Object.keys(full).length > Object.keys(base).length) {
+    console.warn('[tickets] close columns missing, retrying without them (run migration 004):', error.message);
+    ({ data, error } = await supabase
+      .from('tickets').update(base).eq('id', ticketId).select().single());
+  }
 
   if (error) throw error;
   return data as Ticket;

@@ -49,6 +49,7 @@ import {
 import { logToChannel } from '../utils/logger';
 import { isSupportMember } from '../utils/permissions';
 import { generateTranscriptHtml } from '../utils/transcriptHtml';
+import { uploadTranscript } from '../utils/docspace';
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -468,11 +469,21 @@ export async function closeTicket(
     guildName: guild.name,
   });
 
+  // Archive the full transcript to DocSpace (canonical store). Internal link,
+  // staff-only — no-op if DocSpace isn't configured yet.
+  const docspace = await uploadTranscript(
+    `ticket-${ticket.ticket_number}-${openerTag}.html`,
+    htmlContent,
+  );
+
   // Staff transcript (with internal notes) → log channel
   const staffFile = new AttachmentBuilder(Buffer.from(htmlContent, 'utf-8'), {
     name: `transcript-ticket-${ticket.ticket_number}.html`,
   });
   const closeEmbed = ticketCloseEmbed(member.user, closedTicket, transcriptMessages.length);
+  if (docspace) {
+    closeEmbed.addFields({ name: '📄 Transcript (DocSpace)', value: `[Open in DocSpace](${docspace.webUrl})` });
+  }
   await logToChannel(interaction.client, guild.id, closeEmbed, staffFile);
 
   // Customer transcript (NO internal notes) → DM
