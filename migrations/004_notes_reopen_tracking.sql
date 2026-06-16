@@ -4,6 +4,7 @@
 ALTER TABLE tickets ADD COLUMN IF NOT EXISTS first_response_at TIMESTAMPTZ;
 ALTER TABLE tickets ADD COLUMN IF NOT EXISTS close_reason      TEXT;
 ALTER TABLE tickets ADD COLUMN IF NOT EXISTS resolution        TEXT;
+ALTER TABLE tickets ADD COLUMN IF NOT EXISTS transcript_url    TEXT;
 
 -- 2. Internal staff notes (never shown to the ticket opener)
 CREATE TABLE IF NOT EXISTS ticket_notes (
