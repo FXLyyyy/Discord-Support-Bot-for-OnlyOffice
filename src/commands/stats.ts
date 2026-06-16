@@ -35,8 +35,8 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
       { name: '📬 Open / Claimed',       value: String(stats.open),            inline: true },
       { name: '📅 Closed This Month',    value: String(stats.closedThisMonth), inline: true },
       { name: '⏱️ Avg Close Time',       value: stats.avgCloseHours > 0 ? fmtHours(stats.avgCloseHours) : 'N/A', inline: true },
+      { name: '⚡ Avg First Response',   value: stats.firstResponseCount > 0 ? fmtHours(stats.avgFirstResponseHours) : 'N/A', inline: true },
       { name: '⭐ Avg Rating',           value: stats.ratedCount > 0 ? `${stats.avgRating.toFixed(1)}/5 (${stats.ratedCount} rated)` : 'No ratings yet', inline: true },
-      { name: '​',                  value: '​',                      inline: true },
       { name: '🏆 Top Agents',          value: topAgentsField,                inline: false }
     )
     .setTimestamp();

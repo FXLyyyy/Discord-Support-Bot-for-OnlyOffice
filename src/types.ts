@@ -34,8 +34,20 @@ export interface Ticket {
   rated_at: string | null;
   last_activity_at: string;
   inactivity_warned_at: string | null;
+  first_response_at: string | null;
+  close_reason: string | null;
+  resolution: string | null;
   created_at: string;
   closed_at: string | null;
+}
+
+export interface TicketNote {
+  id: string;
+  ticket_id: string;
+  author_id: string;
+  author_tag: string;
+  note: string;
+  created_at: string;
 }
 
 export interface TicketMessage {
@@ -66,6 +78,8 @@ export interface TicketStats {
   open: number;
   closedThisMonth: number;
   avgCloseHours: number;
+  avgFirstResponseHours: number;
+  firstResponseCount: number;
   avgRating: number;
   ratedCount: number;
   topAgents: Array<{ agentId: string; count: number }>;

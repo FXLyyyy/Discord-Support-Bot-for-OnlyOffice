@@ -7,7 +7,19 @@ import { isSupportMember } from '../utils/permissions';
 
 export const data = new SlashCommandBuilder()
   .setName('close')
-  .setDescription('Close the current support ticket');
+  .setDescription('Close the current support ticket')
+  .addStringOption(o =>
+    o.setName('resolution')
+      .setDescription('Resolution summary sent to the user')
+      .setRequired(false)
+      .setMaxLength(1000)
+  )
+  .addStringOption(o =>
+    o.setName('reason')
+      .setDescription('Internal close reason (staff-only, not shown to the user)')
+      .setRequired(false)
+      .setMaxLength(200)
+  );
 
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
   const ticket = await getTicketByChannel(interaction.channelId);
@@ -29,5 +41,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     return;
   }
 
-  await closeTicket(interaction, ticket, config);
+  const resolution = interaction.options.getString('resolution');
+  const reason = interaction.options.getString('reason');
+  await closeTicket(interaction, ticket, config, { resolution, reason });
 }

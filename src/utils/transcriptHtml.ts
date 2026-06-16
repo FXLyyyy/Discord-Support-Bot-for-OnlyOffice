@@ -1,4 +1,4 @@
-import { Ticket, TicketMessage } from '../types';
+import { Ticket, TicketMessage, TicketNote } from '../types';
 
 const AVATAR_COLORS = [
   '#5865f2','#57f287','#faa81a','#eb459e','#ed4245',
@@ -33,11 +33,12 @@ function fmtFull(iso: string): string {
 export function generateTranscriptHtml(params: {
   ticket: Ticket;
   messages: TicketMessage[];
+  notes?: TicketNote[];
   openedByTag: string;
   agentTag: string | null;
   guildName: string;
 }): string {
-  const { ticket, messages, openedByTag, agentTag, guildName } = params;
+  const { ticket, messages, notes = [], openedByTag, agentTag, guildName } = params;
 
   // Always show the original ticket submission at the top
   const submissionBlock = `
@@ -50,6 +51,36 @@ export function generateTranscriptHtml(params: {
 </div>`;
 
   let body = submissionBlock;
+
+  // Resolution + internal close reason (staff-facing document)
+  if (ticket.resolution || ticket.close_reason) {
+    body += `
+<div class="submission resolution">
+  <div class="sub-label">✅ RESOLUTION</div>`;
+    if (ticket.resolution) {
+      body += `<div class="sub-desc">${esc(ticket.resolution)}</div>`;
+    }
+    if (ticket.close_reason) {
+      body += `<div class="sub-row" style="margin-top:8px"><span class="sub-key">Reason</span><span class="sub-val">${esc(ticket.close_reason)}</span></div>`;
+    }
+    body += `</div>`;
+  }
+
+  // Internal staff notes (never shown to the user)
+  if (notes.length > 0) {
+    body += `
+<div class="submission notes">
+  <div class="sub-label">🗒️ INTERNAL NOTES (${notes.length})</div>`;
+    for (const n of notes) {
+      body += `
+  <div class="note">
+    <div class="note-head"><span class="note-author">${esc(n.author_tag)}</span><span class="ts">${fmtFull(n.created_at)}</span></div>
+    <div class="note-body">${esc(n.note)}</div>
+  </div>`;
+    }
+    body += `</div>`;
+  }
+
   let lastUser = '';
   let lastDate = '';
 
@@ -142,6 +173,16 @@ h1{color:#fff;font-size:18px;font-weight:600;}
 .sub-key{color:var(--t2);font-size:13px;font-weight:600;min-width:80px;}
 .sub-val{color:var(--t);font-size:13px;}
 .sub-desc{color:var(--t);font-size:13px;white-space:pre-wrap;word-break:break-word;margin-top:8px;padding-top:8px;border-top:1px solid var(--bg3);}
+.resolution{border-left-color:var(--green,#3ba55c);}
+.resolution .sub-label{color:#3ba55c;}
+.resolution .sub-desc{border-top:none;padding-top:0;}
+.notes{border-left-color:#faa81a;}
+.notes .sub-label{color:#faa81a;}
+.note{margin-top:10px;padding-top:10px;border-top:1px solid var(--bg3);}
+.note:first-of-type{border-top:none;}
+.note-head{display:flex;align-items:baseline;gap:8px;margin-bottom:3px;}
+.note-author{font-weight:600;color:#fff;font-size:13px;}
+.note-body{color:var(--t);font-size:13px;white-space:pre-wrap;word-break:break-word;}
 </style>
 </head>
 <body>

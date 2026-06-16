@@ -45,6 +45,14 @@ export function ticketCloseEmbed(closedBy: User, ticket: Ticket, messageCount: n
     fields.push({ name: 'Agent', value: `<@${ticket.agent_id}>`, inline: true });
   }
 
+  if (ticket.close_reason) {
+    fields.push({ name: 'Reason', value: ticket.close_reason, inline: true });
+  }
+
+  if (ticket.resolution) {
+    fields.push({ name: 'Resolution', value: ticket.resolution.slice(0, 1024), inline: false });
+  }
+
   return new EmbedBuilder()
     .setTitle('🔒 Ticket Closed')
     .setColor(Colors.Red)

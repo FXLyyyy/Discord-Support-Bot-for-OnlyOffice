@@ -12,6 +12,8 @@ import {
   PermissionsBitField,
   GuildMember,
   TextChannel,
+  Guild,
+  User,
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
@@ -29,7 +31,9 @@ import {
   getNextTicketNumber,
   updateTicketStatus,
   getOpenTicketForUser,
+  reopenTicketRecord,
 } from '../db/tickets';
+import { getTicketNotes } from '../db/notes';
 import { saveTranscript } from '../db/transcripts';
 import {
   ticketWelcomeEmbed,
@@ -42,6 +46,116 @@ import {
 import { logToChannel } from '../utils/logger';
 import { isSupportMember } from '../utils/permissions';
 import { generateTranscriptHtml } from '../utils/transcriptHtml';
+
+// ── Shared helpers ────────────────────────────────────────────────────────────
+
+// Builds a private ticket channel with the standard permission overwrites.
+async function buildTicketChannel(
+  guild: Guild,
+  config: ServerConfig,
+  ownerId: string,
+  botId: string,
+  ticketNumber: number,
+  subject: string,
+  category: string,
+  ownerTag: string,
+): Promise<TextChannel> {
+  const userAllow = new PermissionsBitField([
+    PermissionsBitField.Flags.ViewChannel,
+    PermissionsBitField.Flags.SendMessages,
+    PermissionsBitField.Flags.ReadMessageHistory,
+    PermissionsBitField.Flags.AttachFiles,
+    PermissionsBitField.Flags.EmbedLinks,
+    PermissionsBitField.Flags.UseApplicationCommands,
+    PermissionsBitField.Flags.AddReactions,
+  ]);
+
+  const staffAllow = new PermissionsBitField([
+    PermissionsBitField.Flags.ViewChannel,
+    PermissionsBitField.Flags.SendMessages,
+    PermissionsBitField.Flags.ReadMessageHistory,
+    PermissionsBitField.Flags.AttachFiles,
+    PermissionsBitField.Flags.EmbedLinks,
+    PermissionsBitField.Flags.UseApplicationCommands,
+    PermissionsBitField.Flags.ManageMessages,
+    PermissionsBitField.Flags.AddReactions,
+  ]);
+
+  const botAllow = new PermissionsBitField([
+    PermissionsBitField.Flags.ViewChannel,
+    PermissionsBitField.Flags.SendMessages,
+    PermissionsBitField.Flags.ManageChannels,
+    PermissionsBitField.Flags.ReadMessageHistory,
+    PermissionsBitField.Flags.ManageMessages,
+    PermissionsBitField.Flags.AttachFiles,
+    PermissionsBitField.Flags.EmbedLinks,
+  ]);
+
+  const permissionOverwrites = [
+    { id: guild.roles.everyone.id, deny: PermissionsBitField.Flags.ViewChannel },
+    { id: ownerId, allow: userAllow },
+    { id: botId, allow: botAllow },
+    ...config.support_role_ids.map(roleId => ({ id: roleId, allow: staffAllow })),
+  ];
+
+  const channel = await guild.channels.create({
+    name: `ticket-${ticketNumber}`,
+    type: ChannelType.GuildText,
+    parent: config.ticket_category_id ?? undefined,
+    permissionOverwrites,
+    topic: `Ticket #${ticketNumber} | ${subject} | ${category} | User: ${ownerTag} | Status: Open`,
+  });
+
+  return channel as TextChannel;
+}
+
+// Posts the intro message (info + buttons + attach hint) into a ticket channel.
+async function postTicketIntro(
+  channel: TextChannel,
+  owner: User,
+  config: ServerConfig,
+  ticketNumber: number,
+  subject: string,
+  description: string,
+  category: string,
+  reopened = false,
+): Promise<void> {
+  const actionRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId('claim_ticket')
+      .setLabel('Claim')
+      .setStyle(ButtonStyle.Success)
+      .setEmoji('🙋'),
+    new ButtonBuilder()
+      .setCustomId('close_ticket')
+      .setLabel('Close Ticket')
+      .setStyle(ButtonStyle.Danger)
+      .setEmoji('🔒'),
+  );
+
+  const rolePings = config.support_role_ids.map(id => `<@&${id}>`).join(' ');
+  const header = reopened
+    ? `🔄 **Ticket #${ticketNumber} — ${subject}** (reopened)`
+    : `🎫 **Ticket #${ticketNumber} — ${subject}**`;
+
+  const infoContent =
+    `<@${owner.id}>${rolePings ? ` | ${rolePings}` : ''}\n\n` +
+    `${header}\n` +
+    `**Opened by:** <@${owner.id}>\n` +
+    `**Category:** ${category}\n\n` +
+    `**Description:**\n>>> ${description}`;
+
+  await channel.send({
+    content: infoContent,
+    embeds: [ticketWelcomeEmbed(owner, ticketNumber, subject, description, category)],
+    components: [actionRow],
+    allowedMentions: { users: [owner.id], roles: config.support_role_ids },
+  });
+
+  await channel.send({
+    content: '📎 Need to share a file or screenshot? Upload it directly in this channel.',
+  });
+}
 
 type TicketInteraction =
   | ButtonInteraction
@@ -174,51 +288,9 @@ export async function handleTicketModal(
 
   const ticketNumber = await getNextTicketNumber(guild.id);
 
-  const userAllow = new PermissionsBitField([
-    PermissionsBitField.Flags.ViewChannel,
-    PermissionsBitField.Flags.SendMessages,
-    PermissionsBitField.Flags.ReadMessageHistory,
-    PermissionsBitField.Flags.AttachFiles,
-    PermissionsBitField.Flags.EmbedLinks,
-    PermissionsBitField.Flags.UseApplicationCommands,
-    PermissionsBitField.Flags.AddReactions,
-  ]);
-
-  const staffAllow = new PermissionsBitField([
-    PermissionsBitField.Flags.ViewChannel,
-    PermissionsBitField.Flags.SendMessages,
-    PermissionsBitField.Flags.ReadMessageHistory,
-    PermissionsBitField.Flags.AttachFiles,
-    PermissionsBitField.Flags.EmbedLinks,
-    PermissionsBitField.Flags.UseApplicationCommands,
-    PermissionsBitField.Flags.ManageMessages,
-    PermissionsBitField.Flags.AddReactions,
-  ]);
-
-  const botAllow = new PermissionsBitField([
-    PermissionsBitField.Flags.ViewChannel,
-    PermissionsBitField.Flags.SendMessages,
-    PermissionsBitField.Flags.ManageChannels,
-    PermissionsBitField.Flags.ReadMessageHistory,
-    PermissionsBitField.Flags.ManageMessages,
-    PermissionsBitField.Flags.AttachFiles,
-    PermissionsBitField.Flags.EmbedLinks,
-  ]);
-
-  const permissionOverwrites = [
-    { id: guild.roles.everyone.id, deny: PermissionsBitField.Flags.ViewChannel },
-    { id: member.id, allow: userAllow },
-    { id: interaction.client.user.id, allow: botAllow },
-    ...config.support_role_ids.map(roleId => ({ id: roleId, allow: staffAllow })),
-  ];
-
-  const channel = await guild.channels.create({
-    name: `ticket-${ticketNumber}`,
-    type: ChannelType.GuildText,
-    parent: config.ticket_category_id ?? undefined,
-    permissionOverwrites,
-    topic: `Ticket #${ticketNumber} | ${subject} | ${category} | User: ${member.user.tag} | Status: Open`,
-  });
+  const channel = await buildTicketChannel(
+    guild, config, member.id, interaction.client.user.id, ticketNumber, subject, category, member.user.tag,
+  );
 
   await createTicket({
     guildId: guild.id,
@@ -230,40 +302,7 @@ export async function handleTicketModal(
     category,
   });
 
-  const actionRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder()
-      .setCustomId('claim_ticket')
-      .setLabel('Claim')
-      .setStyle(ButtonStyle.Success)
-      .setEmoji('🙋'),
-    new ButtonBuilder()
-      .setCustomId('close_ticket')
-      .setLabel('Close Ticket')
-      .setStyle(ButtonStyle.Danger)
-      .setEmoji('🔒')
-  );
-
-  const rolePings = config.support_role_ids.map(id => `<@&${id}>`).join(' ');
-
-  // Critical ticket info lives in plain message content so it ALWAYS renders,
-  // even if the bot lacks the "Embed Links" permission in this channel.
-  const infoContent =
-    `${member}${rolePings ? ` | ${rolePings}` : ''}\n\n` +
-    `🎫 **Ticket #${ticketNumber} — ${subject}**\n` +
-    `**Opened by:** ${member}\n` +
-    `**Category:** ${category}\n\n` +
-    `**Description:**\n>>> ${description}`;
-
-  await channel.send({
-    content: infoContent,
-    embeds: [ticketWelcomeEmbed(member.user, ticketNumber, subject, description, category)],
-    components: [actionRow],
-    allowedMentions: { users: [member.id], roles: config.support_role_ids },
-  });
-
-  await channel.send({
-    content: '📎 Need to share a file or screenshot? Upload it directly in this channel.',
-  });
+  await postTicketIntro(channel, member.user, config, ticketNumber, subject, description, category);
 
   await interaction.editReply({
     content:
@@ -283,8 +322,12 @@ export async function handleTicketModal(
 export async function closeTicket(
   interaction: TicketInteraction,
   ticket: Ticket,
-  _config: ServerConfig
+  _config: ServerConfig,
+  opts: { resolution?: string | null; reason?: string | null } = {}
 ): Promise<void> {
+  const resolution = opts.resolution?.trim() || null;
+  const reason = opts.reason?.trim() || null;
+
   await interaction.deferReply({ ephemeral: true });
 
   const guild = interaction.guild!;
@@ -334,14 +377,18 @@ export async function closeTicket(
     }).catch(console.error);
   }
 
-  const closedTicket = await updateTicketStatus(ticket.id, 'closed');
+  const closedTicket = await updateTicketStatus(ticket.id, 'closed', undefined, {
+    closeReason: reason,
+    resolution,
+  });
 
-  // Fetch opener + agent in parallel
-  const [openerUser, agentUser] = await Promise.all([
+  // Fetch opener + agent + internal notes in parallel
+  const [openerUser, agentUser, notes] = await Promise.all([
     interaction.client.users.fetch(ticket.user_id).catch(() => null),
     closedTicket.agent_id
       ? interaction.client.users.fetch(closedTicket.agent_id).catch(() => null)
       : Promise.resolve(null),
+    getTicketNotes(ticket.id).catch(() => []),
   ]);
   const openerTag = openerUser?.tag ?? ticket.user_id;
   const agentTag = agentUser?.tag ?? null;
@@ -350,6 +397,7 @@ export async function closeTicket(
   const htmlContent = generateTranscriptHtml({
     ticket: closedTicket,
     messages: transcriptMessages,
+    notes,
     openedByTag: openerTag,
     agentTag,
     guildName: guild.name,
@@ -364,13 +412,12 @@ export async function closeTicket(
   await logToChannel(interaction.client, guild.id, closeEmbed, transcriptFile);
 
   // Friendly heads-up in the channel before it disappears
-  await channel?.send({
-    content:
-      `🔒 **This ticket has been closed by ${member}.**\n` +
-      `Thanks for reaching out to OnlyOffice Support! This channel will be removed in a few seconds. 👋`,
-  }).catch(console.error);
+  const channelLines = [`🔒 **This ticket has been closed by ${member}.**`];
+  if (resolution) channelLines.push('', '**Resolution:**', `>>> ${resolution}`);
+  channelLines.push('', 'Thanks for reaching out to OnlyOffice Support! This channel will be removed in a few seconds. 👋');
+  await channel?.send({ content: channelLines.join('\n') }).catch(console.error);
 
-  // DM user: confirm closure + ask for a rating
+  // DM user: confirm closure (+ resolution) and ask for a rating
   if (openerUser) {
     const ratingRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
       ...[1, 2, 3, 4, 5].map(n =>
@@ -381,12 +428,17 @@ export async function closeTicket(
       )
     );
 
+    const dmLines = [`🔒 Your ticket **#${ticket.ticket_number} — ${ticket.subject}** has been closed.`];
+    if (resolution) dmLines.push('', '**Resolution from our team:**', `>>> ${resolution}`);
+    dmLines.push(
+      '',
+      `Thanks for contacting **OnlyOffice Support**! If you have a moment, ` +
+      `we'd love to know how we did — just tap a rating below. ⭐`
+    );
+
     await openerUser
       .send({
-        content:
-          `🔒 Your ticket **#${ticket.ticket_number} — ${ticket.subject}** has been closed.\n\n` +
-          `Thanks for contacting **OnlyOffice Support**! If you have a moment, ` +
-          `we'd love to know how we did — just tap a rating below. ⭐`,
+        content: dmLines.join('\n'),
         components: [ratingRow],
       })
       .catch(() => null); // DMs may be disabled
@@ -399,6 +451,91 @@ export async function closeTicket(
   setTimeout(() => {
     channel?.delete('Ticket closed').catch(console.error);
   }, 5000);
+}
+
+// ── Close modal (staff): collect a resolution + internal reason ───────────────
+
+export async function showCloseModal(interaction: ButtonInteraction): Promise<void> {
+  const modal = new ModalBuilder()
+    .setCustomId('close_ticket_modal')
+    .setTitle('Close & Resolve Ticket');
+
+  modal.addComponents(
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId('resolution')
+        .setLabel('Resolution (sent to the user)')
+        .setStyle(TextInputStyle.Paragraph)
+        .setPlaceholder('Summarize how the issue was resolved. The user will receive this.')
+        .setRequired(true)
+        .setMaxLength(1000)
+    ),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId('close_reason')
+        .setLabel('Internal reason (optional, staff-only)')
+        .setStyle(TextInputStyle.Short)
+        .setPlaceholder('e.g. resolved, duplicate, no response…')
+        .setRequired(false)
+        .setMaxLength(200)
+    )
+  );
+
+  await interaction.showModal(modal);
+}
+
+// ── Reopen a closed ticket (staff) — creates a fresh channel ──────────────────
+
+export async function reopenTicket(
+  interaction: ChatInputCommandInteraction,
+  ticket: Ticket,
+  config: ServerConfig
+): Promise<void> {
+  await interaction.deferReply({ ephemeral: true });
+
+  const guild = interaction.guild!;
+
+  // Respect the one-live-ticket limit for the original opener
+  const existing = await getOpenTicketForUser(guild.id, ticket.user_id);
+  if (existing) {
+    await interaction.editReply({
+      content:
+        `⚠️ <@${ticket.user_id}> already has a live ticket (<#${existing.channel_id}>). ` +
+        `Close it before reopening **#${ticket.ticket_number}**.`,
+    });
+    return;
+  }
+
+  const opener = await interaction.client.users.fetch(ticket.user_id).catch(() => null);
+
+  const channel = await buildTicketChannel(
+    guild, config, ticket.user_id, interaction.client.user.id,
+    ticket.ticket_number, ticket.subject, ticket.category, opener?.tag ?? ticket.user_id,
+  );
+
+  await reopenTicketRecord(ticket.id, channel.id);
+
+  if (opener) {
+    await postTicketIntro(
+      channel, opener, config, ticket.ticket_number,
+      ticket.subject, ticket.description ?? '(no description)', ticket.category, true,
+    );
+  }
+
+  await interaction.editReply({
+    content: `🔄 **Ticket #${ticket.ticket_number} reopened** → ${channel}`,
+  });
+
+  await logToChannel(
+    interaction.client,
+    guild.id,
+    ticketOpenEmbed(
+      opener ?? interaction.user,
+      ticket.ticket_number,
+      channel.id,
+      `(reopened) ${ticket.subject}`,
+    )
+  );
 }
 
 // ── Claim ticket ──────────────────────────────────────────────────────────────

@@ -41,25 +41,33 @@ export async function getTicketByChannel(channelId: string): Promise<Ticket | nu
 }
 
 export async function getNextTicketNumber(guildId: string): Promise<number> {
-  const { data } = await supabase
+  // Atomic increment via Postgres function (no race between concurrent opens)
+  const { data, error } = await supabase.rpc('next_ticket_number', { g_id: guildId });
+  if (!error && typeof data === 'number') return data;
+
+  // Fallback (e.g. migration not yet applied): non-atomic max + 1
+  const { data: rows } = await supabase
     .from('tickets')
     .select('ticket_number')
     .eq('guild_id', guildId)
     .order('ticket_number', { ascending: false })
     .limit(1);
 
-  if (!data || data.length === 0) return 1;
-  return (data[0].ticket_number as number) + 1;
+  if (!rows || rows.length === 0) return 1;
+  return (rows[0].ticket_number as number) + 1;
 }
 
 export async function updateTicketStatus(
   ticketId: string,
   status: TicketStatus,
-  agentId?: string
+  agentId?: string,
+  extra?: { closeReason?: string | null; resolution?: string | null }
 ): Promise<Ticket> {
   const updates: Record<string, unknown> = { status };
   if (agentId !== undefined) updates.agent_id = agentId;
   if (status === 'closed') updates.closed_at = new Date().toISOString();
+  if (extra?.closeReason !== undefined) updates.close_reason = extra.closeReason;
+  if (extra?.resolution !== undefined) updates.resolution = extra.resolution;
 
   const { data, error } = await supabase
     .from('tickets')
@@ -70,6 +78,53 @@ export async function updateTicketStatus(
 
   if (error) throw error;
   return data as Ticket;
+}
+
+export async function getTicketByNumber(
+  guildId: string,
+  ticketNumber: number
+): Promise<Ticket | null> {
+  const { data } = await supabase
+    .from('tickets')
+    .select('*')
+    .eq('guild_id', guildId)
+    .eq('ticket_number', ticketNumber)
+    .limit(1);
+
+  return data && data.length > 0 ? (data[0] as Ticket) : null;
+}
+
+export async function reopenTicketRecord(
+  ticketId: string,
+  newChannelId: string
+): Promise<Ticket> {
+  const { data, error } = await supabase
+    .from('tickets')
+    .update({
+      status: 'open',
+      channel_id: newChannelId,
+      closed_at: null,
+      close_reason: null,
+      resolution: null,
+      last_activity_at: new Date().toISOString(),
+      inactivity_warned_at: null,
+      first_response_at: null,
+    })
+    .eq('id', ticketId)
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data as Ticket;
+}
+
+// Sets first_response_at only if it hasn't been set yet
+export async function markFirstResponse(ticketId: string): Promise<void> {
+  await supabase
+    .from('tickets')
+    .update({ first_response_at: new Date().toISOString() })
+    .eq('id', ticketId)
+    .is('first_response_at', null);
 }
 
 export async function hasOpenTicket(guildId: string, userId: string): Promise<boolean> {
@@ -187,7 +242,7 @@ export async function getTicketStats(guildId: string): Promise<TicketStats> {
 
   const { data: closedTickets } = await supabase
     .from('tickets')
-    .select('created_at, closed_at, agent_id, rating')
+    .select('created_at, closed_at, first_response_at, agent_id, rating')
     .eq('guild_id', guildId)
     .eq('status', 'closed')
     .not('closed_at', 'is', null)
@@ -195,6 +250,8 @@ export async function getTicketStats(guildId: string): Promise<TicketStats> {
     .limit(200);
 
   let avgCloseHours = 0;
+  let avgFirstResponseHours = 0;
+  let firstResponseCount = 0;
   let avgRating = 0;
   let ratedCount = 0;
   const agentCounts: Record<string, number> = {};
@@ -205,12 +262,19 @@ export async function getTicketStats(guildId: string): Promise<TicketStats> {
         (new Date(t.closed_at).getTime() - new Date(t.created_at).getTime()) /
         (1000 * 60 * 60);
     }
+    if (t.first_response_at) {
+      avgFirstResponseHours +=
+        (new Date(t.first_response_at).getTime() - new Date(t.created_at).getTime()) /
+        (1000 * 60 * 60);
+      firstResponseCount++;
+    }
     if (t.agent_id) agentCounts[t.agent_id] = (agentCounts[t.agent_id] ?? 0) + 1;
     if (t.rating) { avgRating += t.rating; ratedCount++; }
   }
 
   const n = closedTickets?.length ?? 0;
   avgCloseHours = n > 0 ? avgCloseHours / n : 0;
+  avgFirstResponseHours = firstResponseCount > 0 ? avgFirstResponseHours / firstResponseCount : 0;
   avgRating = ratedCount > 0 ? avgRating / ratedCount : 0;
 
   const topAgents = Object.entries(agentCounts)
@@ -223,6 +287,8 @@ export async function getTicketStats(guildId: string): Promise<TicketStats> {
     open: open ?? 0,
     closedThisMonth: closedThisMonth ?? 0,
     avgCloseHours,
+    avgFirstResponseHours,
+    firstResponseCount,
     avgRating,
     ratedCount,
     topAgents,

@@ -3,6 +3,7 @@ import {
   ButtonInteraction,
   ModalSubmitInteraction,
   StringSelectMenuInteraction,
+  GuildMember,
   EmbedBuilder,
   Colors,
 } from 'discord.js';
@@ -14,8 +15,10 @@ import {
   claimTicket,
   handleTicketModal,
   handleCategorySelect,
+  showCloseModal,
 } from '../handlers/ticketHandler';
 import { errorEmbed } from '../utils/embeds';
+import { isSupportMember } from '../utils/permissions';
 import { Command } from '../types';
 
 export const name = 'interactionCreate';
@@ -44,17 +47,28 @@ export async function execute(interaction: Interaction): Promise<void> {
 
   // ── Modal submissions ──────────────────────────────────────────────────────
   if (interaction.isModalSubmit()) {
-    if (interaction.customId.startsWith('open_ticket_modal')) {
-      try {
-        const config = await ensureServerConfig(interaction.guildId!);
-        await handleTicketModal(interaction as ModalSubmitInteraction, config);
-      } catch (err) {
-        console.error('[modal] handleTicketModal error:', err);
-        const payload = { content: '❌ Failed to create ticket. Please try again.', ephemeral: true };
-        interaction.replied || interaction.deferred
-          ? await interaction.followUp(payload).catch(console.error)
-          : await interaction.reply(payload).catch(console.error);
+    const modal = interaction as ModalSubmitInteraction;
+    try {
+      if (modal.customId.startsWith('open_ticket_modal')) {
+        const config = await ensureServerConfig(modal.guildId!);
+        await handleTicketModal(modal, config);
+      } else if (modal.customId === 'close_ticket_modal') {
+        const config = await ensureServerConfig(modal.guildId!);
+        const ticket = await getTicketByChannel(modal.channelId!);
+        if (!ticket || ticket.status === 'closed') {
+          await modal.reply({ content: '❌ No active ticket found for this channel.', ephemeral: true });
+          return;
+        }
+        const resolution = modal.fields.getTextInputValue('resolution');
+        const reason = modal.fields.getTextInputValue('close_reason');
+        await closeTicket(modal, ticket, config, { resolution, reason });
       }
+    } catch (err) {
+      console.error(`[modal] ${modal.customId} error:`, err);
+      const payload = { content: '❌ Something went wrong. Please try again.', ephemeral: true };
+      modal.replied || modal.deferred
+        ? await modal.followUp(payload).catch(console.error)
+        : await modal.reply(payload).catch(console.error);
     }
     return;
   }
@@ -112,7 +126,16 @@ export async function execute(interaction: Interaction): Promise<void> {
         await btn.reply({ embeds: [errorEmbed('No active ticket found for this channel.')], ephemeral: true });
         return;
       }
-      await closeTicket(btn, ticket, config);
+      const member = btn.member as GuildMember;
+      if (isSupportMember(member, config)) {
+        // Staff must provide a resolution → collect it via a modal
+        await showCloseModal(btn);
+      } else if (ticket.user_id === member.id) {
+        // Ticket owner closing their own ticket — no resolution required
+        await closeTicket(btn, ticket, config);
+      } else {
+        await btn.reply({ embeds: [errorEmbed('You do not have permission to close this ticket.')], ephemeral: true });
+      }
       break;
     }
 
