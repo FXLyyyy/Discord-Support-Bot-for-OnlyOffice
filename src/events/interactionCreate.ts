@@ -1,4 +1,4 @@
-import {
+import { MessageFlags,
   Interaction,
   ButtonInteraction,
   ModalSubmitInteraction,
@@ -45,7 +45,7 @@ export async function execute(interaction: Interaction): Promise<void> {
       }
     } catch (err) {
       console.error(`Error in /${interaction.commandName}:`, err);
-      const payload = { content: '❌ An unexpected error occurred.', ephemeral: true };
+      const payload = { content: '❌ An unexpected error occurred.', flags: MessageFlags.Ephemeral as const };
       interaction.replied || interaction.deferred
         ? await interaction.followUp(payload).catch(console.error)
         : await interaction.reply(payload).catch(console.error);
@@ -64,7 +64,7 @@ export async function execute(interaction: Interaction): Promise<void> {
         const config = await ensureServerConfig(modal.guildId!);
         const ticket = await getTicketByChannel(modal.channelId!);
         if (!ticket || ticket.status === 'closed') {
-          await modal.reply({ content: '❌ No active ticket found for this channel.', ephemeral: true });
+          await modal.reply({ content: '❌ No active ticket found for this channel.', flags: MessageFlags.Ephemeral });
           return;
         }
         const resolution = modal.fields.getTextInputValue('resolution');
@@ -77,7 +77,7 @@ export async function execute(interaction: Interaction): Promise<void> {
       if (modal.ephemeral) autoDismiss(modal);
     } catch (err) {
       console.error(`[modal] ${modal.customId} error:`, err);
-      const payload = { content: '❌ Something went wrong. Please try again.', ephemeral: true };
+      const payload = { content: '❌ Something went wrong. Please try again.', flags: MessageFlags.Ephemeral as const };
       modal.replied || modal.deferred
         ? await modal.followUp(payload).catch(console.error)
         : await modal.reply(payload).catch(console.error);
@@ -95,7 +95,7 @@ export async function execute(interaction: Interaction): Promise<void> {
     const rating = parseInt(ratingStr, 10);
 
     if (isNaN(rating) || rating < 1 || rating > 5) {
-      await btn.reply({ content: '❌ Invalid rating.', ephemeral: true });
+      await btn.reply({ content: '❌ Invalid rating.', flags: MessageFlags.Ephemeral });
       return;
     }
 
@@ -130,7 +130,7 @@ export async function execute(interaction: Interaction): Promise<void> {
     case 'close_ticket': {
       const ticket = await getTicketByChannel(btn.channelId);
       if (!ticket || ticket.status === 'closed') {
-        await btn.reply({ embeds: [errorEmbed('No active ticket found for this channel.')], ephemeral: true });
+        await btn.reply({ embeds: [errorEmbed('No active ticket found for this channel.')], flags: MessageFlags.Ephemeral });
         return;
       }
       const member = btn.member as GuildMember;
@@ -141,7 +141,7 @@ export async function execute(interaction: Interaction): Promise<void> {
         // Ticket owner closing their own ticket — no resolution required
         await closeTicket(btn, ticket, config);
       } else {
-        await btn.reply({ embeds: [errorEmbed('You do not have permission to close this ticket.')], ephemeral: true });
+        await btn.reply({ embeds: [errorEmbed('You do not have permission to close this ticket.')], flags: MessageFlags.Ephemeral });
       }
       break;
     }
@@ -149,7 +149,7 @@ export async function execute(interaction: Interaction): Promise<void> {
     case 'claim_ticket': {
       const ticket = await getTicketByChannel(btn.channelId);
       if (!ticket || ticket.status === 'closed') {
-        await btn.reply({ embeds: [errorEmbed('No active ticket found for this channel.')], ephemeral: true });
+        await btn.reply({ embeds: [errorEmbed('No active ticket found for this channel.')], flags: MessageFlags.Ephemeral });
         return;
       }
       await claimTicket(btn, ticket, config);
@@ -170,7 +170,7 @@ export async function execute(interaction: Interaction): Promise<void> {
   if (btn.ephemeral) autoDismiss(btn);
   } catch (err) {
     console.error(`[button] ${btn.customId} error:`, err);
-    const payload = { content: '❌ Something went wrong. Please try again.', ephemeral: true as const };
+    const payload = { content: '❌ Something went wrong. Please try again.', flags: MessageFlags.Ephemeral as const };
     (btn.replied || btn.deferred
       ? btn.followUp(payload)
       : btn.reply(payload)

@@ -1,4 +1,4 @@
-import {
+import { MessageFlags,
   SlashCommandBuilder,
   ChatInputCommandInteraction,
   PermissionFlagsBits,
@@ -55,17 +55,17 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     case 'view': {
       const config = await getServerConfig(guildId);
       if (!config) {
-        await interaction.reply({ embeds: [errorEmbed('No configuration found. Use other /config subcommands to set it up.')], ephemeral: true });
+        await interaction.reply({ embeds: [errorEmbed('No configuration found. Use other /config subcommands to set it up.')], flags: MessageFlags.Ephemeral });
         return;
       }
-      await interaction.reply({ embeds: [configViewEmbed(config)], ephemeral: true });
+      await interaction.reply({ embeds: [configViewEmbed(config)], flags: MessageFlags.Ephemeral });
       break;
     }
 
     case 'set-log-channel': {
       const channel = interaction.options.getChannel('channel', true);
       await upsertServerConfig(guildId, { log_channel_id: channel.id });
-      await interaction.reply({ embeds: [successEmbed(`Log channel set to ${channel}.`)], ephemeral: true });
+      await interaction.reply({ embeds: [successEmbed(`Log channel set to ${channel}.`)], flags: MessageFlags.Ephemeral });
       break;
     }
 
@@ -73,11 +73,11 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
       const categoryId = interaction.options.getString('category-id', true).trim();
       const category = interaction.guild!.channels.cache.get(categoryId);
       if (!category || category.type !== ChannelType.GuildCategory) {
-        await interaction.reply({ embeds: [errorEmbed('Invalid category ID. Make sure to copy the ID of a Category channel.')], ephemeral: true });
+        await interaction.reply({ embeds: [errorEmbed('Invalid category ID. Make sure to copy the ID of a Category channel.')], flags: MessageFlags.Ephemeral });
         return;
       }
       await upsertServerConfig(guildId, { ticket_category_id: categoryId });
-      await interaction.reply({ embeds: [successEmbed(`Ticket category set to **${category.name}**.`)], ephemeral: true });
+      await interaction.reply({ embeds: [successEmbed(`Ticket category set to **${category.name}**.`)], flags: MessageFlags.Ephemeral });
       break;
     }
 
@@ -85,13 +85,13 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
       const role = interaction.options.getRole('role', true);
       const config = await ensureServerConfig(guildId);
       if (config.support_role_ids.includes(role.id)) {
-        await interaction.reply({ embeds: [errorEmbed(`${role} is already a support role.`)], ephemeral: true });
+        await interaction.reply({ embeds: [errorEmbed(`${role} is already a support role.`)], flags: MessageFlags.Ephemeral });
         return;
       }
       await upsertServerConfig(guildId, {
         support_role_ids: [...config.support_role_ids, role.id],
       });
-      await interaction.reply({ embeds: [successEmbed(`Added ${role} as a support role.`)], ephemeral: true });
+      await interaction.reply({ embeds: [successEmbed(`Added ${role} as a support role.`)], flags: MessageFlags.Ephemeral });
       break;
     }
 
@@ -99,17 +99,17 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
       const role = interaction.options.getRole('role', true);
       const config = await ensureServerConfig(guildId);
       if (!config.support_role_ids.includes(role.id)) {
-        await interaction.reply({ embeds: [errorEmbed(`${role} is not a support role.`)], ephemeral: true });
+        await interaction.reply({ embeds: [errorEmbed(`${role} is not a support role.`)], flags: MessageFlags.Ephemeral });
         return;
       }
       await upsertServerConfig(guildId, {
         support_role_ids: config.support_role_ids.filter(id => id !== role.id),
       });
-      await interaction.reply({ embeds: [successEmbed(`Removed ${role} from support roles.`)], ephemeral: true });
+      await interaction.reply({ embeds: [successEmbed(`Removed ${role} from support roles.`)], flags: MessageFlags.Ephemeral });
       break;
     }
 
     default:
-      await interaction.reply({ embeds: [errorEmbed('Unknown subcommand.')], ephemeral: true });
+      await interaction.reply({ embeds: [errorEmbed('Unknown subcommand.')], flags: MessageFlags.Ephemeral });
   }
 }

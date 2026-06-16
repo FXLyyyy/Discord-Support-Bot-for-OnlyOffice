@@ -1,4 +1,4 @@
-import {
+import { MessageFlags,
   SlashCommandBuilder,
   ChatInputCommandInteraction,
   GuildMember,
@@ -20,7 +20,7 @@ export const data = new SlashCommandBuilder()
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
   const ticket = await getTicketByChannel(interaction.channelId);
   if (!ticket || ticket.status === 'closed') {
-    await interaction.reply({ embeds: [errorEmbed('This is not an active ticket channel.')], ephemeral: true });
+    await interaction.reply({ embeds: [errorEmbed('This is not an active ticket channel.')], flags: MessageFlags.Ephemeral });
     return;
   }
 
@@ -28,7 +28,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
   const member = interaction.member as GuildMember;
 
   if (!config || !isSupportMember(member, config)) {
-    await interaction.reply({ embeds: [errorEmbed('Only support staff can add users to tickets.')], ephemeral: true });
+    await interaction.reply({ embeds: [errorEmbed('Only support staff can add users to tickets.')], flags: MessageFlags.Ephemeral });
     return;
   }
 

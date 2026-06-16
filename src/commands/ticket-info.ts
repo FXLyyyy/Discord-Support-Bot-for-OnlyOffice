@@ -1,4 +1,4 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder, Colors, TextChannel, GuildMember } from 'discord.js';
+import { MessageFlags, SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder, Colors, TextChannel, GuildMember } from 'discord.js';
 import { getTicketByChannel } from '../db/tickets';
 import { countTicketNotes, countUserInternalNotes } from '../db/notes';
 import { getUserNotes } from '../db/userNotes';
@@ -27,13 +27,13 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
   const member = interaction.member as GuildMember;
 
   if (!config || !isSupportMember(member, config)) {
-    await interaction.reply({ embeds: [errorEmbed('Only support staff can use this command.')], ephemeral: true });
+    await interaction.reply({ embeds: [errorEmbed('Only support staff can use this command.')], flags: MessageFlags.Ephemeral });
     return;
   }
 
   const ticket = await getTicketByChannel(interaction.channelId);
   if (!ticket || ticket.status === 'closed') {
-    await interaction.reply({ embeds: [errorEmbed('This is not an active ticket channel.')], ephemeral: true });
+    await interaction.reply({ embeds: [errorEmbed('This is not an active ticket channel.')], flags: MessageFlags.Ephemeral });
     return;
   }
 
@@ -93,5 +93,5 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     .addFields(fields)
     .setTimestamp();
 
-  await interaction.reply({ embeds: [embed], ephemeral: true });
+  await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
 }

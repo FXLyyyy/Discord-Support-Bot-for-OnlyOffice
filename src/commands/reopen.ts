@@ -1,4 +1,4 @@
-import {
+import { MessageFlags,
   SlashCommandBuilder,
   ChatInputCommandInteraction,
   GuildMember,
@@ -21,7 +21,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
   const member = interaction.member as GuildMember;
 
   if (!config || !isSupportMember(member, config)) {
-    await interaction.reply({ embeds: [errorEmbed('Only support staff can reopen tickets.')], ephemeral: true });
+    await interaction.reply({ embeds: [errorEmbed('Only support staff can reopen tickets.')], flags: MessageFlags.Ephemeral });
     return;
   }
 
@@ -29,14 +29,14 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
   const ticket = await getTicketByNumber(interaction.guildId!, number);
 
   if (!ticket) {
-    await interaction.reply({ embeds: [errorEmbed(`No ticket #${number} found in this server.`)], ephemeral: true });
+    await interaction.reply({ embeds: [errorEmbed(`No ticket #${number} found in this server.`)], flags: MessageFlags.Ephemeral });
     return;
   }
 
   if (ticket.status !== 'closed') {
     await interaction.reply({
       embeds: [errorEmbed(`Ticket #${number} is still open: <#${ticket.channel_id}>`)],
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }

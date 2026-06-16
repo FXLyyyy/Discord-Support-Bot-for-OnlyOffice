@@ -1,4 +1,4 @@
-import {
+import { MessageFlags,
   SlashCommandBuilder,
   ChatInputCommandInteraction,
   GuildMember,
@@ -19,7 +19,7 @@ export const data = new SlashCommandBuilder()
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
   const ticket = await getTicketByChannel(interaction.channelId);
   if (!ticket || ticket.status === 'closed') {
-    await interaction.reply({ embeds: [errorEmbed('This is not an active ticket channel.')], ephemeral: true });
+    await interaction.reply({ embeds: [errorEmbed('This is not an active ticket channel.')], flags: MessageFlags.Ephemeral });
     return;
   }
 
@@ -27,14 +27,14 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
   const member = interaction.member as GuildMember;
 
   if (!config || !isSupportMember(member, config)) {
-    await interaction.reply({ embeds: [errorEmbed('Only support staff can remove users from tickets.')], ephemeral: true });
+    await interaction.reply({ embeds: [errorEmbed('Only support staff can remove users from tickets.')], flags: MessageFlags.Ephemeral });
     return;
   }
 
   const targetUser = interaction.options.getUser('user', true);
 
   if (targetUser.id === ticket.user_id) {
-    await interaction.reply({ embeds: [errorEmbed('Cannot remove the ticket owner.')], ephemeral: true });
+    await interaction.reply({ embeds: [errorEmbed('Cannot remove the ticket owner.')], flags: MessageFlags.Ephemeral });
     return;
   }
 

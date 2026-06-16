@@ -1,4 +1,4 @@
-import {
+import { MessageFlags,
   SlashCommandBuilder,
   ChatInputCommandInteraction,
   GuildMember,
@@ -23,7 +23,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
   const member = interaction.member as GuildMember;
 
   if (!config || !isSupportMember(member, config)) {
-    await interaction.reply({ embeds: [errorEmbed('Only support staff can post internal notes.')], ephemeral: true });
+    await interaction.reply({ embeds: [errorEmbed('Only support staff can post internal notes.')], flags: MessageFlags.Ephemeral });
     return;
   }
 
@@ -31,7 +31,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
   if (!ticket || ticket.status === 'closed') {
     await interaction.reply({
       embeds: [errorEmbed('This command can only be used inside an active ticket channel.')],
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -58,6 +58,6 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
           : 'Internal note saved to the transcript. (Could not open a private thread — check the bot\'s Manage Threads permission.)'
       ),
     ],
-    ephemeral: true,
+    flags: MessageFlags.Ephemeral,
   });
 }

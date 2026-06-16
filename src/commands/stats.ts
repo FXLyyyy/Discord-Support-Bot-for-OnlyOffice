@@ -1,6 +1,8 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder, Colors } from 'discord.js';
+import { MessageFlags, SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder, Colors, GuildMember } from 'discord.js';
 import { getTicketStats } from '../db/tickets';
+import { getServerConfig } from '../db/servers';
 import { errorEmbed } from '../utils/embeds';
+import { isSupportMember } from '../utils/permissions';
 
 export const data = new SlashCommandBuilder()
   .setName('stats')
@@ -13,7 +15,14 @@ function fmtHours(h: number): string {
 }
 
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
-  await interaction.deferReply({ ephemeral: true });
+  const config = await getServerConfig(interaction.guildId!);
+  const member = interaction.member as GuildMember;
+  if (!config || !isSupportMember(member, config)) {
+    await interaction.reply({ embeds: [errorEmbed('Only support staff can view statistics.')], flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   const stats = await getTicketStats(interaction.guildId!).catch(() => null);
   if (!stats) {

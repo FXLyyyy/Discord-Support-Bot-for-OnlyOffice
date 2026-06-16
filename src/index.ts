@@ -5,6 +5,7 @@ import { readdirSync } from 'fs';
 import { join } from 'path';
 import { Command } from './types';
 import { checkInactiveTickets, cleanupArchivedTickets } from './handlers/inactivityHandler';
+import { loadActiveTicketChannels } from './cache';
 
 config();
 
@@ -74,6 +75,7 @@ async function registerCommands(): Promise<void> {
 
 client.once('ready', async () => {
   await registerCommands();
+  await loadActiveTicketChannels().catch(err => console.error('[cache] load failed:', err));
 
   // Run inactivity check every 30 minutes
   setInterval(() => {

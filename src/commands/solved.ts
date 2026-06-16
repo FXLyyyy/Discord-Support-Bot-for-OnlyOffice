@@ -1,4 +1,4 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction, GuildMember } from 'discord.js';
+import { MessageFlags, SlashCommandBuilder, ChatInputCommandInteraction, GuildMember } from 'discord.js';
 import { getTicketByChannel } from '../db/tickets';
 import { getServerConfig } from '../db/servers';
 import { closeTicket } from '../handlers/ticketHandler';
@@ -14,7 +14,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
   if (!ticket || ticket.status === 'closed') {
     await interaction.reply({
       embeds: [errorEmbed('This command can only be used inside an active ticket channel.')],
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -23,7 +23,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
   if (!config) {
     await interaction.reply({
       embeds: [errorEmbed('Server not configured. Ask an admin to run /config first.')],
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -33,7 +33,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
   if (ticket.user_id !== member.id && !isSupportMember(member, config)) {
     await interaction.reply({
       embeds: [errorEmbed('Only the ticket owner or support staff can mark this ticket as solved.')],
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }

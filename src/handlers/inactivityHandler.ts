@@ -9,6 +9,7 @@ import {
 } from '../db/tickets';
 import { saveTranscript } from '../db/transcripts';
 import { logToChannel } from '../utils/logger';
+import { removeTicketChannel } from '../cache';
 import { Ticket, TicketMessage } from '../types';
 
 // How long archived ticket channels are kept before being physically deleted.
@@ -76,6 +77,7 @@ export async function checkInactiveTickets(client: Client): Promise<void> {
       .catch(() => null) as TextChannel | null;
 
     await updateTicketStatus(ticket.id, 'closed').catch(console.error);
+    removeTicketChannel(ticket.channel_id);
 
     if (channel?.isTextBased()) {
       const messages = await fetchAllMessages(channel);

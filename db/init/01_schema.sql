@@ -5,14 +5,12 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 -- Per-guild configuration
 CREATE TABLE IF NOT EXISTS servers (
-  guild_id                TEXT        PRIMARY KEY,
-  support_role_ids        JSONB       NOT NULL DEFAULT '[]',
-  log_channel_id          TEXT,
-  ticket_category_id      TEXT,
-  panel_channel_id        TEXT,
-  auto_thread_channel_ids JSONB       NOT NULL DEFAULT '[]',
-  created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  guild_id           TEXT        PRIMARY KEY,
+  support_role_ids   JSONB       NOT NULL DEFAULT '[]',
+  log_channel_id     TEXT,
+  ticket_category_id TEXT,
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS panels (
@@ -33,7 +31,6 @@ CREATE TABLE IF NOT EXISTS tickets (
   ticket_number        INTEGER     NOT NULL,
   subject              TEXT        NOT NULL DEFAULT 'Support Request',
   description          TEXT,
-  category             TEXT        NOT NULL DEFAULT 'General',
   rating               INTEGER     CHECK (rating >= 1 AND rating <= 5),
   rated_at             TIMESTAMPTZ,
   last_activity_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),

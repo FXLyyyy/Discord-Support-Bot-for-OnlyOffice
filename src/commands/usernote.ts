@@ -1,4 +1,4 @@
-import {
+import { MessageFlags,
   SlashCommandBuilder,
   ChatInputCommandInteraction,
   GuildMember,
@@ -39,7 +39,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
   const member = interaction.member as GuildMember;
 
   if (!config || !isSupportMember(member, config)) {
-    await interaction.reply({ embeds: [errorEmbed('Only support staff can manage user notes.')], ephemeral: true });
+    await interaction.reply({ embeds: [errorEmbed('Only support staff can manage user notes.')], flags: MessageFlags.Ephemeral });
     return;
   }
 
@@ -55,14 +55,14 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
       authorTag: member.user.tag,
       note,
     });
-    await interaction.reply({ embeds: [successEmbed(`Note saved for ${target}.`)], ephemeral: true });
+    await interaction.reply({ embeds: [successEmbed(`Note saved for ${target}.`)], flags: MessageFlags.Ephemeral });
     return;
   }
 
   if (sub === 'list') {
     const notes = await getUserNotes(interaction.guildId!, target.id);
     if (notes.length === 0) {
-      await interaction.reply({ embeds: [successEmbed(`No notes for ${target} yet.`)], ephemeral: true });
+      await interaction.reply({ embeds: [successEmbed(`No notes for ${target} yet.`)], flags: MessageFlags.Ephemeral });
       return;
     }
     const lines = notes.map((n, i) => {
@@ -74,7 +74,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
       .setColor(Colors.Blurple)
       .setDescription(lines.join('\n'))
       .setFooter({ text: 'Remove with /usernote remove user number' });
-    await interaction.reply({ embeds: [embed], ephemeral: true });
+    await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
     return;
   }
 
@@ -83,7 +83,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     const removed = await deleteUserNoteAt(interaction.guildId!, target.id, number);
     await interaction.reply({
       embeds: [removed ? successEmbed(`Removed note #${number} for ${target}.`) : errorEmbed(`No note #${number} found for ${target}.`)],
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }

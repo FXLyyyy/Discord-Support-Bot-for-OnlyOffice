@@ -3,8 +3,6 @@ export interface ServerConfig {
   support_role_ids: string[];
   log_channel_id: string | null;
   ticket_category_id: string | null;
-  panel_channel_id: string | null;
-  auto_thread_channel_ids: string[];
   created_at: string;
   updated_at: string;
 }
@@ -29,7 +27,6 @@ export interface Ticket {
   ticket_number: number;
   subject: string;
   description: string | null;
-  category: string;
   rating: number | null;
   rated_at: string | null;
   last_activity_at: string;

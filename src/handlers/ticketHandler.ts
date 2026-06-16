@@ -1,4 +1,4 @@
-import {
+import { MessageFlags,
   ButtonInteraction,
   ChatInputCommandInteraction,
   ModalSubmitInteraction,
@@ -39,6 +39,7 @@ import {
 } from '../db/tickets';
 import { getTicketNotes } from '../db/notes';
 import { getUserNotes } from '../db/userNotes';
+import { addTicketChannel, removeTicketChannel } from '../cache';
 import { saveTranscript } from '../db/transcripts';
 import {
   ticketWelcomeEmbed,
@@ -282,6 +283,19 @@ type TicketInteraction =
   | ChatInputCommandInteraction
   | ModalSubmitInteraction;
 
+// Replies (or edits) ephemerally. editReply can't carry the Ephemeral flag —
+// the ephemeral-ness is fixed when the interaction is first answered.
+async function ephemeralRespond(
+  interaction: TicketInteraction,
+  embeds: EmbedBuilder[]
+): Promise<void> {
+  if (interaction.deferred || interaction.replied) {
+    await interaction.editReply({ embeds });
+  } else {
+    await interaction.reply({ embeds, flags: MessageFlags.Ephemeral });
+  }
+}
+
 // ── "Open Ticket" button → modal with subject + description ───────────────────
 
 export async function openTicket(
@@ -298,7 +312,7 @@ export async function openTicket(
         `⚠️ **You already have an open ticket.**\n` +
         `To keep things organized, each member can have only **one live ticket at a time**.\n\n` +
         `👉 Please continue in <#${existing.channel_id}> — once it's closed, you can open a new one.`,
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -337,7 +351,7 @@ export async function handleTicketModal(
   interaction: ModalSubmitInteraction,
   config: ServerConfig
 ): Promise<void> {
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   const guild = interaction.guild!;
   const member = interaction.member as GuildMember;
@@ -368,6 +382,7 @@ export async function handleTicketModal(
     subject,
     description,
   });
+  addTicketChannel(channel.id);
 
   await postTicketIntro(channel, member.user, config, ticketNumber, subject, description);
 
@@ -449,7 +464,7 @@ export async function closeTicket(
   const resolution = opts.resolution?.trim() || null;
   const reason = opts.reason?.trim() || null;
 
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   const guild = interaction.guild!;
   const member = interaction.member as GuildMember;
@@ -502,6 +517,7 @@ export async function closeTicket(
     closeReason: reason,
     resolution,
   });
+  removeTicketChannel(ticket.channel_id);
 
   // Fetch opener + agent + internal notes in parallel
   const [openerUser, agentUser, notes] = await Promise.all([
@@ -675,6 +691,7 @@ async function performReopen(
     );
     await reopenTicketRecord(ticket.id, channel.id);
   }
+  addTicketChannel(channel.id);
 
   const rolePings = config.support_role_ids.map(id => `<@&${id}>`).join(' ');
   await channel
@@ -712,7 +729,7 @@ export async function reopenTicket(
   ticket: Ticket,
   config: ServerConfig
 ): Promise<void> {
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   const guild = interaction.guild!;
 
@@ -738,7 +755,7 @@ export async function handleReopenButton(
   interaction: ButtonInteraction,
   config: ServerConfig
 ): Promise<void> {
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   const guild = interaction.guild!;
   const member = interaction.member as GuildMember;
@@ -795,7 +812,7 @@ export async function handlePanelReopen(
   interaction: ModalSubmitInteraction,
   config: ServerConfig
 ): Promise<void> {
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   const guild = interaction.guild!;
   const member = interaction.member as GuildMember;
@@ -846,7 +863,7 @@ export async function assignTicket(
   config: ServerConfig,
   agent: User
 ): Promise<void> {
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   const updated = await updateTicketStatus(ticket.id, 'claimed', agent.id);
 
@@ -882,21 +899,12 @@ export async function claimTicket(
   const member = interaction.member as GuildMember;
 
   if (!isSupportMember(member, config)) {
-    const reply = { embeds: [errorEmbed('Only support staff can claim tickets.')], ephemeral: true };
-    interaction.deferred || interaction.replied
-      ? await interaction.editReply(reply)
-      : await interaction.reply(reply);
+    await ephemeralRespond(interaction, [errorEmbed('Only support staff can claim tickets.')]);
     return;
   }
 
   if (ticket.agent_id) {
-    const reply = {
-      embeds: [errorEmbed(`This ticket is already claimed by <@${ticket.agent_id}>.`)],
-      ephemeral: true,
-    };
-    interaction.deferred || interaction.replied
-      ? await interaction.editReply(reply)
-      : await interaction.reply(reply);
+    await ephemeralRespond(interaction, [errorEmbed(`This ticket is already claimed by <@${ticket.agent_id}>.`)]);
     return;
   }
 
@@ -921,10 +929,7 @@ export async function claimTicket(
     allowedMentions: { users: [] },
   }).catch(console.error);
 
-  const reply = { embeds: [successEmbed('You have claimed this ticket.')], ephemeral: true };
-  interaction.deferred || interaction.replied
-    ? await interaction.editReply(reply)
-    : await interaction.reply(reply);
+  await ephemeralRespond(interaction, [successEmbed('You have claimed this ticket.')]);
 
   await logToChannel(
     interaction.client,

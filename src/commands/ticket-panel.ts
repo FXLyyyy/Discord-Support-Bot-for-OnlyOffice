@@ -1,4 +1,4 @@
-import {
+import { MessageFlags,
   SlashCommandBuilder,
   ChatInputCommandInteraction,
   PermissionFlagsBits,
@@ -24,7 +24,7 @@ export const data = new SlashCommandBuilder()
 
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
   if (!interaction.guild) {
-    await interaction.reply({ embeds: [errorEmbed('This command must be used in a server.')], ephemeral: true });
+    await interaction.reply({ embeds: [errorEmbed('This command must be used in a server.')], flags: MessageFlags.Ephemeral });
     return;
   }
 
@@ -73,5 +73,5 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     [interaction.guildId!, interaction.channelId, message.id]
   );
 
-  await interaction.reply({ embeds: [{ description: '✅ Panel created!', color: 0x00b300 }], ephemeral: true });
+  await interaction.reply({ embeds: [{ description: '✅ Panel created!', color: 0x00b300 }], flags: MessageFlags.Ephemeral });
 }

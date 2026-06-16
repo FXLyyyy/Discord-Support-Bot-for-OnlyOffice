@@ -2,6 +2,7 @@ import { Message, GuildMember } from 'discord.js';
 import { getServerConfig } from '../db/servers';
 import { updateLastActivity, getTicketByChannel, markFirstResponse } from '../db/tickets';
 import { isSupportMember } from '../utils/permissions';
+import { isTicketChannel } from '../cache';
 
 export const name = 'messageCreate';
 export const once = false;
@@ -9,7 +10,9 @@ export const once = false;
 export async function execute(message: Message): Promise<void> {
   if (message.author.bot || !message.guildId) return;
 
-  // Ticket-channel activity tracking
+  // Fast path: skip the DB entirely unless this is a known active ticket channel
+  if (!isTicketChannel(message.channelId)) return;
+
   const ticket = await getTicketByChannel(message.channelId);
   if (!ticket || ticket.status === 'closed') return;
 
