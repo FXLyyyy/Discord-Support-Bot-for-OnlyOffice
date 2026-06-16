@@ -14,6 +14,8 @@ import {
   GuildMember,
   TextChannel,
   CategoryChannel,
+  ThreadChannel,
+  ThreadAutoArchiveDuration,
   Guild,
   User,
   ActionRowBuilder,
@@ -35,6 +37,8 @@ import {
   getOpenTicketForUser,
   reopenTicketRecord,
   getTicketByChannel,
+  getTicketByNumber,
+  setTranscriptUrl,
 } from '../db/tickets';
 import { getTicketNotes } from '../db/notes';
 import { saveTranscript } from '../db/transcripts';
@@ -221,6 +225,51 @@ function ticketActionRow(): ActionRowBuilder<ButtonBuilder> {
     new ButtonBuilder().setCustomId('claim_ticket').setLabel('Claim').setStyle(ButtonStyle.Success).setEmoji('🙋'),
     new ButtonBuilder().setCustomId('close_ticket').setLabel('Close Ticket').setStyle(ButtonStyle.Danger).setEmoji('🔒'),
   );
+}
+
+// Finds or lazily creates the private staff-only thread for a ticket channel.
+// The ticket owner can't see it; support staff are added explicitly.
+export async function ensureStaffThread(
+  channel: TextChannel,
+  config: ServerConfig,
+  ticketNumber: number
+): Promise<ThreadChannel | null> {
+  // Reuse an existing staff thread if present
+  let thread = channel.threads.cache.find(
+    t => t.name.startsWith('🔒 staff') && !t.archived
+  ) as ThreadChannel | undefined;
+
+  if (!thread) {
+    const active = await channel.threads.fetchActive().catch(() => null);
+    thread = active?.threads.find(t => t.name.startsWith('🔒 staff')) as ThreadChannel | undefined;
+  }
+
+  if (thread) return thread;
+
+  const created = await channel.threads
+    .create({
+      name: `🔒 staff-${ticketNumber}`,
+      type: ChannelType.PrivateThread,
+      invitable: false,
+      autoArchiveDuration: ThreadAutoArchiveDuration.OneWeek,
+    })
+    .catch(err => {
+      console.error('[thread] failed to create staff thread:', err);
+      return null;
+    });
+
+  if (!created) return null;
+
+  // Add all support-staff members so they can see the private thread
+  const ids = new Set<string>();
+  for (const roleId of config.support_role_ids) {
+    channel.guild.roles.cache.get(roleId)?.members.forEach(m => ids.add(m.id));
+  }
+  for (const id of ids) {
+    await created.members.add(id).catch(() => null);
+  }
+
+  return created as ThreadChannel;
 }
 
 type TicketInteraction =
@@ -475,6 +524,7 @@ export async function closeTicket(
     `ticket-${ticket.ticket_number}-${openerTag}.html`,
     htmlContent,
   );
+  if (docspace) await setTranscriptUrl(ticket.id, docspace.webUrl).catch(console.error);
 
   // Staff transcript (with internal notes) → log channel
   const staffFile = new AttachmentBuilder(Buffer.from(htmlContent, 'utf-8'), {
@@ -617,6 +667,23 @@ async function performReopen(
     })
     .catch(console.error);
 
+  // Re-assign to the previous agent (if any) and brief them privately
+  if (ticket.agent_id) {
+    await updateTicketStatus(ticket.id, 'claimed', ticket.agent_id).catch(console.error);
+
+    const thread = await ensureStaffThread(channel, config, ticket.ticket_number);
+    const link = ticket.transcript_url
+      ? `\n📄 Previous transcript: ${ticket.transcript_url}`
+      : '\n📄 Previous transcript: see #ticket-logs.';
+    await thread
+      ?.send({
+        content:
+          `🔄 <@${ticket.agent_id}> — ticket **#${ticket.ticket_number}** (${ticket.subject}) was reopened and is back on you.${link}`,
+        allowedMentions: { users: [ticket.agent_id] },
+      })
+      .catch(console.error);
+  }
+
   return channel;
 }
 
@@ -692,6 +759,81 @@ export async function handleReopenButton(
   const channel = await performReopen(interaction.client, guild, config, ticket);
   await interaction.editReply({
     content: channel ? `🔄 Ticket reopened: ${channel}` : '❌ Could not reopen this ticket.',
+  });
+
+  if (channel) {
+    await logToChannel(
+      interaction.client,
+      guild.id,
+      ticketOpenEmbed(member.user, ticket.ticket_number, channel.id, `(reopened) ${ticket.subject}`)
+    );
+  }
+}
+
+// Panel "Reopen a ticket" button → modal asking for the ticket number
+export async function showPanelReopenModal(interaction: ButtonInteraction): Promise<void> {
+  const modal = new ModalBuilder()
+    .setCustomId('reopen_panel_modal')
+    .setTitle('Reopen a Ticket');
+  modal.addComponents(
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId('ticket_number')
+        .setLabel('Your ticket number (e.g. 7)')
+        .setStyle(TextInputStyle.Short)
+        .setPlaceholder('7')
+        .setRequired(true)
+        .setMaxLength(10)
+    )
+  );
+  await interaction.showModal(modal);
+}
+
+// Handles the panel reopen modal submission (user reopening their own old ticket)
+export async function handlePanelReopen(
+  interaction: ModalSubmitInteraction,
+  config: ServerConfig
+): Promise<void> {
+  await interaction.deferReply({ ephemeral: true });
+
+  const guild = interaction.guild!;
+  const member = interaction.member as GuildMember;
+  const raw = interaction.fields.getTextInputValue('ticket_number').replace(/[^0-9]/g, '');
+  const number = parseInt(raw, 10);
+
+  if (!number || isNaN(number)) {
+    await interaction.editReply({ content: '❌ Please enter a valid ticket number.' });
+    return;
+  }
+
+  const ticket = await getTicketByNumber(guild.id, number);
+  if (!ticket) {
+    await interaction.editReply({ content: `❌ No ticket #${number} found in this server.` });
+    return;
+  }
+
+  // Only the original owner (or staff) may reopen it
+  if (ticket.user_id !== member.id && !isSupportMember(member, config)) {
+    await interaction.editReply({ content: '❌ You can only reopen your own tickets.' });
+    return;
+  }
+
+  if (ticket.status !== 'closed') {
+    await interaction.editReply({ content: `That ticket is still open: <#${ticket.channel_id}>` });
+    return;
+  }
+
+  const existing = await getOpenTicketForUser(guild.id, ticket.user_id);
+  if (existing && existing.id !== ticket.id) {
+    await interaction.editReply({
+      content: `⚠️ There's already a live ticket open: <#${existing.channel_id}>. Please continue there.`,
+    });
+    return;
+  }
+
+  const channel = await performReopen(interaction.client, guild, config, ticket);
+  await interaction.editReply({
+    content: channel ? `🔄 Ticket #${number} reopened: ${channel}` : '❌ Could not reopen this ticket.',
   });
 
   if (channel) {

@@ -124,6 +124,10 @@ export async function reopenTicketRecord(
   return data as Ticket;
 }
 
+export async function setTranscriptUrl(ticketId: string, url: string): Promise<void> {
+  await supabase.from('tickets').update({ transcript_url: url }).eq('id', ticketId);
+}
+
 // Sets first_response_at only if it hasn't been set yet
 export async function markFirstResponse(ticketId: string): Promise<void> {
   await supabase

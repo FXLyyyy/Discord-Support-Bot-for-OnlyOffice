@@ -2,21 +2,20 @@ import {
   SlashCommandBuilder,
   ChatInputCommandInteraction,
   GuildMember,
-  EmbedBuilder,
-  Colors,
+  TextChannel,
 } from 'discord.js';
 import { getTicketByChannel } from '../db/tickets';
 import { addTicketNote } from '../db/notes';
 import { getServerConfig } from '../db/servers';
 import { errorEmbed, successEmbed } from '../utils/embeds';
 import { isSupportMember } from '../utils/permissions';
-import { logToChannel } from '../utils/logger';
+import { ensureStaffThread } from '../handlers/ticketHandler';
 
 export const data = new SlashCommandBuilder()
-  .setName('add-note')
-  .setDescription('Add an internal staff note to this ticket (never shown to the user)')
+  .setName('internal')
+  .setDescription('Post a staff-only internal note (hidden from the customer)')
   .addStringOption(o =>
-    o.setName('note').setDescription('The internal note to record').setRequired(true).setMaxLength(1000)
+    o.setName('note').setDescription('The internal note').setRequired(true).setMaxLength(1000)
   );
 
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
@@ -24,7 +23,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
   const member = interaction.member as GuildMember;
 
   if (!config || !isSupportMember(member, config)) {
-    await interaction.reply({ embeds: [errorEmbed('Only support staff can add internal notes.')], ephemeral: true });
+    await interaction.reply({ embeds: [errorEmbed('Only support staff can post internal notes.')], ephemeral: true });
     return;
   }
 
@@ -39,6 +38,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
 
   const note = interaction.options.getString('note', true);
 
+  // Persist for the transcript
   await addTicketNote({
     ticketId: ticket.id,
     authorId: member.id,
@@ -46,23 +46,18 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     note,
   });
 
+  // Post into the private staff thread (customer can't see it)
+  const thread = await ensureStaffThread(interaction.channel as TextChannel, config, ticket.ticket_number);
+  await thread?.send({ content: `🗒️ **${member}**: ${note}`, allowedMentions: { parse: [] } }).catch(() => null);
+
   await interaction.reply({
-    embeds: [successEmbed('Internal note saved. It will appear in the transcript but is hidden from the user.')],
+    embeds: [
+      successEmbed(
+        thread
+          ? `Internal note posted to ${thread} (staff-only) and saved to the transcript.`
+          : 'Internal note saved to the transcript. (Could not open a private thread — check the bot\'s Manage Threads permission.)'
+      ),
+    ],
     ephemeral: true,
   });
-
-  // Keep a record in the log channel too
-  await logToChannel(
-    interaction.client,
-    interaction.guildId!,
-    new EmbedBuilder()
-      .setTitle('🗒️ Internal Note Added')
-      .setColor(Colors.Orange)
-      .addFields(
-        { name: 'Ticket #', value: String(ticket.ticket_number), inline: true },
-        { name: 'By', value: `${member}`, inline: true },
-        { name: 'Note', value: note.slice(0, 1024), inline: false }
-      )
-      .setTimestamp()
-  );
 }

@@ -49,7 +49,12 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
       .setCustomId('open_ticket')
       .setLabel('Open a Ticket')
       .setStyle(ButtonStyle.Primary)
-      .setEmoji('🎫')
+      .setEmoji('🎫'),
+    new ButtonBuilder()
+      .setCustomId('reopen_panel')
+      .setLabel('Reopen a Ticket')
+      .setStyle(ButtonStyle.Secondary)
+      .setEmoji('🔄')
   );
 
   // Render the panel text as plain content (always shows, even without the

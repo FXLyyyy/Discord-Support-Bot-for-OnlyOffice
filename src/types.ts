@@ -37,6 +37,7 @@ export interface Ticket {
   first_response_at: string | null;
   close_reason: string | null;
   resolution: string | null;
+  transcript_url: string | null;
   created_at: string;
   closed_at: string | null;
 }

@@ -17,6 +17,8 @@ import {
   handleCategorySelect,
   showCloseModal,
   handleReopenButton,
+  showPanelReopenModal,
+  handlePanelReopen,
 } from '../handlers/ticketHandler';
 import { errorEmbed } from '../utils/embeds';
 import { isSupportMember } from '../utils/permissions';
@@ -63,6 +65,9 @@ export async function execute(interaction: Interaction): Promise<void> {
         const resolution = modal.fields.getTextInputValue('resolution');
         const reason = modal.fields.getTextInputValue('close_reason');
         await closeTicket(modal, ticket, config, { resolution, reason });
+      } else if (modal.customId === 'reopen_panel_modal') {
+        const config = await ensureServerConfig(modal.guildId!);
+        await handlePanelReopen(modal, config);
       }
     } catch (err) {
       console.error(`[modal] ${modal.customId} error:`, err);
@@ -154,6 +159,10 @@ export async function execute(interaction: Interaction): Promise<void> {
 
     case 'reopen_ticket':
       await handleReopenButton(btn, config);
+      break;
+
+    case 'reopen_panel':
+      await showPanelReopenModal(btn);
       break;
 
     default:
