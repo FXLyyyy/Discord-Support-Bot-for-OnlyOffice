@@ -86,8 +86,3 @@ export interface TicketStats {
   topAgents: Array<{ agentId: string; count: number }>;
 }
 
-export const TICKET_CATEGORIES: Record<string, string> = {
-  category_1: 'Category 1',
-  category_2: 'Category 2',
-  category_3: 'Category 3',
-};

@@ -73,13 +73,11 @@ export function ticketWelcomeEmbed(
   ticketNumber: number,
   subject: string,
   description: string,
-  category: string,
 ): EmbedBuilder {
   return new EmbedBuilder()
     .setTitle(`Ticket #${ticketNumber} — ${subject}`)
     .setDescription(
-      `**Opened by:** <@${user.id}>\n` +
-      `**Category:** ${category}\n\n` +
+      `**Opened by:** <@${user.id}>\n\n` +
       `**Description:**\n${description}`
     )
     .setColor(Colors.Blue)

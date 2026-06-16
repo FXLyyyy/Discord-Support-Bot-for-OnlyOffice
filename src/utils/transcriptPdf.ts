@@ -49,7 +49,6 @@ export function generateTranscriptPdf(params: {
       `Status: ${ticket.status}`,
       `Opened by: ${openedByTag}`,
       agentTag ? `Agent: ${agentTag}` : null,
-      `Category: ${ticket.category}`,
       `Opened: ${fmt(ticket.created_at)}`,
       ticket.closed_at ? `Closed: ${fmt(ticket.closed_at)}` : null,
       ticket.rating ? `Rating: ${ticket.rating}/5` : null,

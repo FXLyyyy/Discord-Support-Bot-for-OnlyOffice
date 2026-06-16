@@ -2,7 +2,6 @@ import {
   Interaction,
   ButtonInteraction,
   ModalSubmitInteraction,
-  StringSelectMenuInteraction,
   GuildMember,
   EmbedBuilder,
   Colors,
@@ -14,7 +13,6 @@ import {
   closeTicket,
   claimTicket,
   handleTicketModal,
-  handleCategorySelect,
   showCloseModal,
   handleReopenButton,
   showPanelReopenModal,
@@ -75,14 +73,6 @@ export async function execute(interaction: Interaction): Promise<void> {
       modal.replied || modal.deferred
         ? await modal.followUp(payload).catch(console.error)
         : await modal.reply(payload).catch(console.error);
-    }
-    return;
-  }
-
-  // ── String select menus ────────────────────────────────────────────────────
-  if (interaction.isStringSelectMenu()) {
-    if (interaction.customId === 'select_ticket_category') {
-      await handleCategorySelect(interaction as StringSelectMenuInteraction);
     }
     return;
   }

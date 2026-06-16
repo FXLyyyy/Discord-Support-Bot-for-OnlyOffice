@@ -46,7 +46,6 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
 
   const fields = [
     { name: 'Subject',    value: ticket.subject,                    inline: false },
-    { name: 'Category',   value: ticket.category,                   inline: true  },
     { name: 'Status',     value: STATUS_LABEL[ticket.status],       inline: true  },
     { name: 'Opened By',  value: `<@${ticket.user_id}>`,            inline: true  },
     { name: 'Opened',     value: `<t:${openedTs}:R>`,               inline: true  },

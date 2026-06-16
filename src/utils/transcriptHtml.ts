@@ -49,7 +49,6 @@ export function generateTranscriptHtml(params: {
 <div class="submission">
   <div class="sub-label">📋 TICKET SUBMITTED</div>
   <div class="sub-row"><span class="sub-key">Subject</span><span class="sub-val">${esc(ticket.subject)}</span></div>
-  <div class="sub-row"><span class="sub-key">Category</span><span class="sub-val">${esc(ticket.category)}</span></div>
   <div class="sub-row"><span class="sub-key">Description</span></div>
   <div class="sub-desc">${esc(ticket.description ?? '—')}</div>
 </div>`;
@@ -202,7 +201,6 @@ h1{color:#fff;font-size:18px;font-weight:600;}
     <span>📅 Opened ${fmtFull(ticket.created_at)}</span>
     <span>🔒 Closed ${fmtFull(ticket.closed_at ?? ticket.created_at)}</span>
     ${agentTag ? `<span>🛡️ ${esc(agentTag)}</span>` : ''}
-    <span>🏷️ ${esc(ticket.category)}</span>
     <span>💬 ${messages.length} messages</span>
     <span>🏠 ${esc(guildName)}</span>
   </div>

@@ -2,13 +2,10 @@ import {
   ButtonInteraction,
   ChatInputCommandInteraction,
   ModalSubmitInteraction,
-  StringSelectMenuInteraction,
   Client,
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
-  StringSelectMenuBuilder,
-  StringSelectMenuOptionBuilder,
   ChannelType,
   PermissionsBitField,
   GuildMember,
@@ -28,8 +25,7 @@ import {
   EmbedBuilder,
   Colors,
 } from 'discord.js';
-// StringSelectMenu* kept for the legacy openTicket fallback path
-import { ServerConfig, Ticket, TicketMessage, TICKET_CATEGORIES } from '../types';
+import { ServerConfig, Ticket, TicketMessage } from '../types';
 import {
   createTicket,
   getNextTicketNumber,
@@ -67,7 +63,6 @@ async function buildTicketChannel(
   botId: string,
   ticketNumber: number,
   subject: string,
-  category: string,
   ownerTag: string,
 ): Promise<TextChannel> {
   const userAllow = new PermissionsBitField([
@@ -113,7 +108,7 @@ async function buildTicketChannel(
     type: ChannelType.GuildText,
     parent: config.ticket_category_id ?? undefined,
     permissionOverwrites,
-    topic: `Ticket #${ticketNumber} | ${subject} | ${category} | User: ${ownerTag} | Status: Open`,
+    topic: `Ticket #${ticketNumber} | ${subject} | User: ${ownerTag} | Status: Open`,
   });
 
   return channel as TextChannel;
@@ -127,7 +122,6 @@ async function postTicketIntro(
   ticketNumber: number,
   subject: string,
   description: string,
-  category: string,
   reopened = false,
 ): Promise<void> {
   const actionRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -151,13 +145,12 @@ async function postTicketIntro(
   const infoContent =
     `<@${owner.id}>${rolePings ? ` | ${rolePings}` : ''}\n\n` +
     `${header}\n` +
-    `**Opened by:** <@${owner.id}>\n` +
-    `**Category:** ${category}\n\n` +
+    `**Opened by:** <@${owner.id}>\n\n` +
     `**Description:**\n>>> ${description}`;
 
   await channel.send({
     content: infoContent,
-    embeds: [ticketWelcomeEmbed(owner, ticketNumber, subject, description, category)],
+    embeds: [ticketWelcomeEmbed(owner, ticketNumber, subject, description)],
     components: [actionRow],
     allowedMentions: { users: [owner.id], roles: config.support_role_ids },
   });
@@ -279,7 +272,7 @@ type TicketInteraction =
   | ChatInputCommandInteraction
   | ModalSubmitInteraction;
 
-// ── "Open Ticket" button → modal with category + subject + description ────────
+// ── "Open Ticket" button → modal with subject + description ───────────────────
 
 export async function openTicket(
   interaction: ButtonInteraction,
@@ -300,23 +293,11 @@ export async function openTicket(
     return;
   }
 
-  const categoryHint = Object.values(TICKET_CATEGORIES).join('  ·  ');
-
   const modal = new ModalBuilder()
     .setCustomId('open_ticket_modal')
     .setTitle('Open a Support Ticket');
 
   modal.addComponents(
-    new ActionRowBuilder<TextInputBuilder>().addComponents(
-      new TextInputBuilder()
-        .setCustomId('ticket_category')
-        .setLabel('Category')
-        .setStyle(TextInputStyle.Short)
-        .setPlaceholder(categoryHint)
-        .setValue(Object.values(TICKET_CATEGORIES)[0])
-        .setRequired(true)
-        .setMaxLength(50)
-    ),
     new ActionRowBuilder<TextInputBuilder>().addComponents(
       new TextInputBuilder()
         .setCustomId('ticket_subject')
@@ -340,34 +321,7 @@ export async function openTicket(
   await interaction.showModal(modal);
 }
 
-// ── Kept for backward compatibility (old panels still emit this) ──────────────
-
-export async function handleCategorySelect(
-  interaction: StringSelectMenuInteraction
-): Promise<void> {
-  // Old panels with a select menu: just show the modal using the chosen category
-  const categoryValue = interaction.values[0];
-  const modal = new ModalBuilder()
-    .setCustomId(`open_ticket_modal:${categoryValue}`)
-    .setTitle('Open a Support Ticket');
-  modal.addComponents(
-    new ActionRowBuilder<TextInputBuilder>().addComponents(
-      new TextInputBuilder()
-        .setCustomId('ticket_subject').setLabel('Subject')
-        .setStyle(TextInputStyle.Short).setPlaceholder("e.g. Can't open a document")
-        .setRequired(true).setMaxLength(100)
-    ),
-    new ActionRowBuilder<TextInputBuilder>().addComponents(
-      new TextInputBuilder()
-        .setCustomId('ticket_description').setLabel('Describe your issue')
-        .setStyle(TextInputStyle.Paragraph).setPlaceholder('Please provide as much detail as possible…')
-        .setRequired(true).setMaxLength(1000)
-    )
-  );
-  await interaction.showModal(modal);
-}
-
-// ── Step 3: Modal submitted — create ticket channel ───────────────────────────
+// ── Modal submitted — create ticket channel ───────────────────────────────────
 
 export async function handleTicketModal(
   interaction: ModalSubmitInteraction,
@@ -379,19 +333,6 @@ export async function handleTicketModal(
   const member = interaction.member as GuildMember;
   const subject = interaction.fields.getTextInputValue('ticket_subject');
   const description = interaction.fields.getTextInputValue('ticket_description');
-
-  // New modal: category is a text field. Legacy modal: category is in the customId.
-  let category: string;
-  if (interaction.customId.includes(':')) {
-    const categoryValue = interaction.customId.split(':')[1] ?? 'category_1';
-    category = TICKET_CATEGORIES[categoryValue] ?? Object.values(TICKET_CATEGORIES)[0];
-  } else {
-    const raw = interaction.fields.getTextInputValue('ticket_category').trim();
-    const match = Object.values(TICKET_CATEGORIES).find(
-      label => label.toLowerCase() === raw.toLowerCase()
-    );
-    category = match ?? raw; // accept free text if it doesn't match a known label
-  }
 
   const existing = await getOpenTicketForUser(guild.id, member.id);
   if (existing) {
@@ -406,7 +347,7 @@ export async function handleTicketModal(
   const ticketNumber = await getNextTicketNumber(guild.id);
 
   const channel = await buildTicketChannel(
-    guild, config, member.id, interaction.client.user.id, ticketNumber, subject, category, member.user.tag,
+    guild, config, member.id, interaction.client.user.id, ticketNumber, subject, member.user.tag,
   );
 
   const newTicket = await createTicket({
@@ -416,10 +357,9 @@ export async function handleTicketModal(
     ticketNumber,
     subject,
     description,
-    category,
   });
 
-  await postTicketIntro(channel, member.user, config, ticketNumber, subject, description, category);
+  await postTicketIntro(channel, member.user, config, ticketNumber, subject, description);
 
   // Returning-user briefing: list past tickets (with transcript links) for staff
   const [pastTickets, priorNotes] = await Promise.all([
@@ -696,7 +636,7 @@ async function performReopen(
     const opener = await client.users.fetch(ticket.user_id).catch(() => null);
     channel = await buildTicketChannel(
       guild, config, ticket.user_id, client.user!.id,
-      ticket.ticket_number, ticket.subject, ticket.category, opener?.tag ?? ticket.user_id,
+      ticket.ticket_number, ticket.subject, opener?.tag ?? ticket.user_id,
     );
     await reopenTicketRecord(ticket.id, channel.id);
   }
@@ -861,6 +801,40 @@ export async function handlePanelReopen(
       ticketOpenEmbed(member.user, ticket.ticket_number, channel.id, `(reopened) ${ticket.subject}`)
     );
   }
+}
+
+// ── Assign ticket to a specific agent (staff/admin) ───────────────────────────
+
+export async function assignTicket(
+  interaction: ChatInputCommandInteraction,
+  ticket: Ticket,
+  config: ServerConfig,
+  agent: User
+): Promise<void> {
+  await interaction.deferReply({ ephemeral: true });
+
+  const updated = await updateTicketStatus(ticket.id, 'claimed', agent.id);
+
+  let channel = interaction.guild!.channels.cache.get(ticket.channel_id) as TextChannel | undefined;
+  if (!channel) {
+    const fetched = await interaction.guild!.channels.fetch(ticket.channel_id).catch(() => null);
+    channel = (fetched as TextChannel | null) ?? undefined;
+  }
+
+  await channel
+    ?.setTopic(`Ticket #${ticket.ticket_number} | ${ticket.subject} | Agent: ${agent.tag} | Status: Claimed`)
+    .catch(console.error);
+
+  await channel
+    ?.send({
+      content: `📌 **${agent}** has been assigned to this ticket by ${interaction.user}. They'll be helping you out!`,
+      allowedMentions: { users: [agent.id] },
+    })
+    .catch(console.error);
+
+  await interaction.editReply({ embeds: [successEmbed(`Assigned this ticket to ${agent}.`)] });
+
+  await logToChannel(interaction.client, interaction.guild!.id, ticketClaimEmbed(agent, updated));
 }
 
 // ── Claim ticket ──────────────────────────────────────────────────────────────
