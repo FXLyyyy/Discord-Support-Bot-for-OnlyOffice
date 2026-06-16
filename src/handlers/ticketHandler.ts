@@ -322,10 +322,7 @@ export async function openTicket(
         .setCustomId('ticket_description')
         .setLabel('Describe your issue')
         .setStyle(TextInputStyle.Paragraph)
-        .setPlaceholder(
-          'e.g. When I double-click my document the editor opens to a blank ' +
-          'screen and never loads. I\'m on version 8.1, Windows 11. It worked yesterday.'
-        )
+        .setPlaceholder("e.g. Editor shows a blank screen when I open my .docx. Version 8.1, Windows 11.")
         .setRequired(true)
         .setMaxLength(1000)
     )
