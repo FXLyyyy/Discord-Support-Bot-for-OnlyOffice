@@ -16,6 +16,7 @@ import {
   handleTicketModal,
   handleCategorySelect,
   showCloseModal,
+  handleReopenButton,
 } from '../handlers/ticketHandler';
 import { errorEmbed } from '../utils/embeds';
 import { isSupportMember } from '../utils/permissions';
@@ -84,9 +85,8 @@ export async function execute(interaction: Interaction): Promise<void> {
   // ── Buttons ────────────────────────────────────────────────────────────────
   if (!interaction.isButton()) return;
   const btn = interaction as ButtonInteraction;
-  if (!btn.guild) return;
 
-  // Rating buttons: rate_ticket:TICKET_ID:RATING
+  // Rating buttons arrive via DM (no guild) — handle BEFORE the guild guard
   if (btn.customId.startsWith('rate_ticket:')) {
     const [, ticketId, ratingStr] = btn.customId.split(':');
     const rating = parseInt(ratingStr, 10);
@@ -112,6 +112,9 @@ export async function execute(interaction: Interaction): Promise<void> {
     });
     return;
   }
+
+  // Remaining buttons are all in-guild
+  if (!btn.guild) return;
 
   const config = await ensureServerConfig(btn.guildId!);
 
@@ -148,6 +151,10 @@ export async function execute(interaction: Interaction): Promise<void> {
       await claimTicket(btn, ticket, config);
       break;
     }
+
+    case 'reopen_ticket':
+      await handleReopenButton(btn, config);
+      break;
 
     default:
       break;

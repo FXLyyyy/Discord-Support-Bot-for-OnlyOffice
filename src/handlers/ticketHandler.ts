@@ -3,6 +3,7 @@ import {
   ChatInputCommandInteraction,
   ModalSubmitInteraction,
   StringSelectMenuInteraction,
+  Client,
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
@@ -12,6 +13,7 @@ import {
   PermissionsBitField,
   GuildMember,
   TextChannel,
+  CategoryChannel,
   Guild,
   User,
   ActionRowBuilder,
@@ -32,6 +34,7 @@ import {
   updateTicketStatus,
   getOpenTicketForUser,
   reopenTicketRecord,
+  getTicketByChannel,
 } from '../db/tickets';
 import { getTicketNotes } from '../db/notes';
 import { saveTranscript } from '../db/transcripts';
@@ -153,8 +156,70 @@ async function postTicketIntro(
   });
 
   await channel.send({
-    content: '📎 Need to share a file or screenshot? Upload it directly in this channel.',
+    content:
+      '📋 **A few things to know:**\n' +
+      '• 📎 You can attach files and screenshots directly in this channel.\n' +
+      "• ⏰ If there's no activity for **24 hours**, you'll get a reminder; after **48 hours** the ticket auto-closes.\n" +
+      '• 🔄 A closed ticket can be **reopened** with the button in it — no need to open a new one.\n' +
+      '• 🔒 Please don\'t share passwords or other sensitive data here.',
   });
+}
+
+const ARCHIVE_CATEGORY_NAME = 'Closed Tickets';
+
+// Finds a "Closed Tickets" category with room (< 50 children), creating one
+// (or an overflow "Closed Tickets 2/3…") when needed to respect Discord limits.
+async function findOrCreateArchiveCategory(guild: Guild): Promise<CategoryChannel | null> {
+  const categories = guild.channels.cache.filter(
+    c => c.type === ChannelType.GuildCategory && c.name.startsWith(ARCHIVE_CATEGORY_NAME)
+  );
+
+  for (const cat of categories.values()) {
+    const childCount = guild.channels.cache.filter(ch => ch.parentId === cat.id).size;
+    if (childCount < 50) return cat as CategoryChannel;
+  }
+
+  const n = categories.size;
+  const name = n === 0 ? ARCHIVE_CATEGORY_NAME : `${ARCHIVE_CATEGORY_NAME} ${n + 1}`;
+  const created = await guild.channels
+    .create({ name, type: ChannelType.GuildCategory })
+    .catch(() => null);
+  return created ?? null;
+}
+
+// Locks a ticket channel (read-only for the opener) and moves it to the archive.
+export async function archiveTicketChannel(channel: TextChannel, guild: Guild, ticket: Ticket): Promise<void> {
+  const archive = await findOrCreateArchiveCategory(guild);
+  await channel.permissionOverwrites
+    .edit(ticket.user_id, { SendMessages: false, ViewChannel: true, ReadMessageHistory: true })
+    .catch(console.error);
+  if (archive) {
+    await channel.setParent(archive.id, { lockPermissions: false }).catch(console.error);
+  }
+  await channel.setName(`closed-${ticket.ticket_number}`).catch(console.error);
+}
+
+// Restores a previously archived channel back to an active ticket channel.
+async function unarchiveTicketChannel(
+  channel: TextChannel,
+  config: ServerConfig,
+  ticket: Ticket
+): Promise<void> {
+  await channel.permissionOverwrites
+    .edit(ticket.user_id, { SendMessages: true, ViewChannel: true, ReadMessageHistory: true })
+    .catch(console.error);
+  await channel
+    .setParent(config.ticket_category_id ?? null, { lockPermissions: false })
+    .catch(console.error);
+  await channel.setName(`ticket-${ticket.ticket_number}`).catch(console.error);
+}
+
+// The Claim / Close action row shown on an active ticket.
+function ticketActionRow(): ActionRowBuilder<ButtonBuilder> {
+  return new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId('claim_ticket').setLabel('Claim').setStyle(ButtonStyle.Success).setEmoji('🙋'),
+    new ButtonBuilder().setCustomId('close_ticket').setLabel('Close Ticket').setStyle(ButtonStyle.Danger).setEmoji('🔒'),
+  );
 }
 
 type TicketInteraction =
@@ -403,21 +468,39 @@ export async function closeTicket(
     guildName: guild.name,
   });
 
-  const transcriptFile = new AttachmentBuilder(Buffer.from(htmlContent, 'utf-8'), {
+  // Staff transcript (with internal notes) → log channel
+  const staffFile = new AttachmentBuilder(Buffer.from(htmlContent, 'utf-8'), {
+    name: `transcript-ticket-${ticket.ticket_number}.html`,
+  });
+  const closeEmbed = ticketCloseEmbed(member.user, closedTicket, transcriptMessages.length);
+  await logToChannel(interaction.client, guild.id, closeEmbed, staffFile);
+
+  // Customer transcript (NO internal notes) → DM
+  const customerHtml = generateTranscriptHtml({
+    ticket: closedTicket,
+    messages: transcriptMessages,
+    notes: [], // never expose internal notes to the user
+    openedByTag: openerTag,
+    agentTag,
+    guildName: guild.name,
+  });
+  const customerFile = new AttachmentBuilder(Buffer.from(customerHtml, 'utf-8'), {
     name: `transcript-ticket-${ticket.ticket_number}.html`,
   });
 
-  // Post close embed + transcript to log channel
-  const closeEmbed = ticketCloseEmbed(member.user, closedTicket, transcriptMessages.length);
-  await logToChannel(interaction.client, guild.id, closeEmbed, transcriptFile);
+  // Archive the channel (read-only + moved to Closed Tickets) — chat is preserved
+  if (channel) await archiveTicketChannel(channel, guild, ticket);
 
-  // Friendly heads-up in the channel before it disappears
+  // In-channel close notice + Reopen button (owner keeps read access)
+  const reopenRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId('reopen_ticket').setLabel('Reopen Ticket').setStyle(ButtonStyle.Success).setEmoji('🔄')
+  );
   const channelLines = [`🔒 **This ticket has been closed by ${member}.**`];
   if (resolution) channelLines.push('', '**Resolution:**', `>>> ${resolution}`);
-  channelLines.push('', 'Thanks for reaching out to OnlyOffice Support! This channel will be removed in a few seconds. 👋');
-  await channel?.send({ content: channelLines.join('\n') }).catch(console.error);
+  channelLines.push('', 'Need more help? Reopen this ticket any time with the button below. 🔄');
+  await channel?.send({ content: channelLines.join('\n'), components: [reopenRow] }).catch(console.error);
 
-  // DM user: confirm closure (+ resolution) and ask for a rating
+  // DM user: closure (+ resolution) + transcript (no internals) + rating
   if (openerUser) {
     const ratingRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
       ...[1, 2, 3, 4, 5].map(n =>
@@ -432,25 +515,22 @@ export async function closeTicket(
     if (resolution) dmLines.push('', '**Resolution from our team:**', `>>> ${resolution}`);
     dmLines.push(
       '',
-      `Thanks for contacting **OnlyOffice Support**! If you have a moment, ` +
-      `we'd love to know how we did — just tap a rating below. ⭐`
+      `A full transcript is attached for your records. Thanks for contacting **OnlyOffice Support**! ` +
+      `If you have a moment, we'd love to know how we did — just tap a rating below. ⭐`
     );
 
     await openerUser
       .send({
         content: dmLines.join('\n'),
+        files: [customerFile],
         components: [ratingRow],
       })
       .catch(() => null); // DMs may be disabled
   }
 
   await interaction.editReply({
-    content: '✅ Ticket closed. The transcript has been saved and this channel will be deleted shortly.',
+    content: '✅ Ticket closed and archived. The transcript has been saved and sent to the user.',
   });
-
-  setTimeout(() => {
-    channel?.delete('Ticket closed').catch(console.error);
-  }, 5000);
 }
 
 // ── Close modal (staff): collect a resolution + internal reason ───────────────
@@ -484,7 +564,50 @@ export async function showCloseModal(interaction: ButtonInteraction): Promise<vo
   await interaction.showModal(modal);
 }
 
-// ── Reopen a closed ticket (staff) — creates a fresh channel ──────────────────
+// ── Reopen a closed ticket ────────────────────────────────────────────────────
+
+// Core reopen: reuse the archived channel (chat preserved); if it was already
+// cleaned up, build a fresh one. Returns the live channel.
+async function performReopen(
+  client: Client,
+  guild: Guild,
+  config: ServerConfig,
+  ticket: Ticket
+): Promise<TextChannel | null> {
+  let channel: TextChannel | undefined;
+
+  if (ticket.channel_id) {
+    const fetched = await guild.channels.fetch(ticket.channel_id).catch(() => null);
+    channel = (fetched as TextChannel | null) ?? undefined;
+  }
+
+  if (channel) {
+    // Archived channel still exists → unlock & restore it (full history kept)
+    await unarchiveTicketChannel(channel, config, ticket);
+    await reopenTicketRecord(ticket.id, channel.id);
+  } else {
+    // Channel was cleaned up → recreate a fresh one
+    const opener = await client.users.fetch(ticket.user_id).catch(() => null);
+    channel = await buildTicketChannel(
+      guild, config, ticket.user_id, client.user!.id,
+      ticket.ticket_number, ticket.subject, ticket.category, opener?.tag ?? ticket.user_id,
+    );
+    await reopenTicketRecord(ticket.id, channel.id);
+  }
+
+  const rolePings = config.support_role_ids.map(id => `<@&${id}>`).join(' ');
+  await channel
+    .send({
+      content:
+        `🔄 **Ticket #${ticket.ticket_number} reopened.** <@${ticket.user_id}>${rolePings ? ` | ${rolePings}` : ''}\n` +
+        `Welcome back — how can we help?`,
+      components: [ticketActionRow()],
+      allowedMentions: { users: [ticket.user_id], roles: config.support_role_ids },
+    })
+    .catch(console.error);
+
+  return channel;
+}
 
 export async function reopenTicket(
   interaction: ChatInputCommandInteraction,
@@ -497,7 +620,7 @@ export async function reopenTicket(
 
   // Respect the one-live-ticket limit for the original opener
   const existing = await getOpenTicketForUser(guild.id, ticket.user_id);
-  if (existing) {
+  if (existing && existing.id !== ticket.id) {
     await interaction.editReply({
       content:
         `⚠️ <@${ticket.user_id}> already has a live ticket (<#${existing.channel_id}>). ` +
@@ -506,36 +629,67 @@ export async function reopenTicket(
     return;
   }
 
-  const opener = await interaction.client.users.fetch(ticket.user_id).catch(() => null);
-
-  const channel = await buildTicketChannel(
-    guild, config, ticket.user_id, interaction.client.user.id,
-    ticket.ticket_number, ticket.subject, ticket.category, opener?.tag ?? ticket.user_id,
-  );
-
-  await reopenTicketRecord(ticket.id, channel.id);
-
-  if (opener) {
-    await postTicketIntro(
-      channel, opener, config, ticket.ticket_number,
-      ticket.subject, ticket.description ?? '(no description)', ticket.category, true,
-    );
-  }
+  const channel = await performReopen(interaction.client, guild, config, ticket);
 
   await interaction.editReply({
-    content: `🔄 **Ticket #${ticket.ticket_number} reopened** → ${channel}`,
+    content: channel
+      ? `🔄 **Ticket #${ticket.ticket_number} reopened** → ${channel}`
+      : '❌ Could not reopen this ticket.',
   });
 
-  await logToChannel(
-    interaction.client,
-    guild.id,
-    ticketOpenEmbed(
-      opener ?? interaction.user,
-      ticket.ticket_number,
-      channel.id,
-      `(reopened) ${ticket.subject}`,
-    )
-  );
+  if (channel) {
+    await logToChannel(
+      interaction.client,
+      guild.id,
+      ticketOpenEmbed(interaction.user, ticket.ticket_number, channel.id, `(reopened) ${ticket.subject}`)
+    );
+  }
+}
+
+// In-channel "Reopen Ticket" button (owner or staff)
+export async function handleReopenButton(
+  interaction: ButtonInteraction,
+  config: ServerConfig
+): Promise<void> {
+  await interaction.deferReply({ ephemeral: true });
+
+  const guild = interaction.guild!;
+  const member = interaction.member as GuildMember;
+  const ticket = await getTicketByChannel(interaction.channelId);
+
+  if (!ticket) {
+    await interaction.editReply({ content: '❌ Ticket record not found for this channel.' });
+    return;
+  }
+  if (ticket.status !== 'closed') {
+    await interaction.editReply({ content: 'This ticket is already open.' });
+    return;
+  }
+  if (ticket.user_id !== member.id && !isSupportMember(member, config)) {
+    await interaction.editReply({ content: '❌ Only the ticket owner or support staff can reopen this ticket.' });
+    return;
+  }
+
+  const existing = await getOpenTicketForUser(guild.id, ticket.user_id);
+  if (existing && existing.id !== ticket.id) {
+    await interaction.editReply({
+      content: `⚠️ There is already a live ticket open: <#${existing.channel_id}>. Please continue there.`,
+    });
+    return;
+  }
+
+  const channel = await performReopen(interaction.client, guild, config, ticket);
+  await interaction.editReply({
+    content: channel ? `🔄 Ticket reopened: ${channel}` : '❌ Could not reopen this ticket.',
+  });
+
+  if (channel) {
+    await logToChannel(
+      interaction.client,
+      guild.id,
+      ticketOpenEmbed(member.user, ticket.ticket_number, channel.id, `(reopened) ${ticket.subject}`)
+    );
+  }
 }
 
 // ── Claim ticket ──────────────────────────────────────────────────────────────

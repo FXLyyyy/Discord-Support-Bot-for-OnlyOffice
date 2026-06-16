@@ -3,7 +3,7 @@ import { config } from 'dotenv';
 import { readdirSync } from 'fs';
 import { join } from 'path';
 import { Command } from './types';
-import { checkInactiveTickets } from './handlers/inactivityHandler';
+import { checkInactiveTickets, cleanupArchivedTickets } from './handlers/inactivityHandler';
 
 config();
 
@@ -49,12 +49,16 @@ for (const file of readdirSync(commandsPath).filter(f => f.match(/\.[jt]s$/))) {
 
 client.once('ready', () => {
   // Run inactivity check every 30 minutes
-  const INTERVAL_MS = 30 * 60 * 1000;
   setInterval(() => {
     checkInactiveTickets(client).catch(console.error);
-  }, INTERVAL_MS);
-
+  }, 30 * 60 * 1000);
   console.log(`[inactivity] Checker scheduled every 30 minutes`);
+
+  // Clean up old archived ticket channels once a day
+  setInterval(() => {
+    cleanupArchivedTickets(client).catch(console.error);
+  }, 24 * 60 * 60 * 1000);
+  console.log(`[cleanup] Archived-ticket cleanup scheduled daily`);
 });
 
 client.login(process.env.DISCORD_TOKEN);

@@ -127,6 +127,24 @@ export async function markFirstResponse(ticketId: string): Promise<void> {
     .is('first_response_at', null);
 }
 
+// Archived tickets whose channel is older than the retention window and still exists
+export async function getArchivedTicketsToDelete(retentionDays: number): Promise<Ticket[]> {
+  const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000).toISOString();
+  const { data } = await supabase
+    .from('tickets')
+    .select('*')
+    .eq('status', 'closed')
+    .not('channel_id', 'is', null)
+    .lt('closed_at', cutoff);
+
+  return (data ?? []) as Ticket[];
+}
+
+// Marks a ticket's channel as physically removed (channel_id null = "cleaned up")
+export async function markChannelDeleted(ticketId: string): Promise<void> {
+  await supabase.from('tickets').update({ channel_id: null }).eq('id', ticketId);
+}
+
 export async function hasOpenTicket(guildId: string, userId: string): Promise<boolean> {
   const { data } = await supabase
     .from('tickets')

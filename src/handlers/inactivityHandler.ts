@@ -1,8 +1,18 @@
-import { Client, EmbedBuilder, Colors, TextChannel } from 'discord.js';
-import { getTicketsForInactivityCheck, markInactivityWarned, updateTicketStatus } from '../db/tickets';
+import { Client, EmbedBuilder, Colors, TextChannel, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
+import { archiveTicketChannel } from './ticketHandler';
+import {
+  getTicketsForInactivityCheck,
+  markInactivityWarned,
+  updateTicketStatus,
+  getArchivedTicketsToDelete,
+  markChannelDeleted,
+} from '../db/tickets';
 import { saveTranscript } from '../db/transcripts';
 import { logToChannel } from '../utils/logger';
 import { Ticket, TicketMessage } from '../types';
+
+// How long archived ticket channels are kept before being physically deleted.
+export const ARCHIVE_RETENTION_DAYS = 30;
 
 const INACTIVITY_WARN_TEXT =
   '⏰ **Just checking in!** This ticket has been quiet for **24 hours**.\n' +
@@ -65,15 +75,22 @@ export async function checkInactiveTickets(client: Client): Promise<void> {
       .fetch(ticket.channel_id)
       .catch(() => null) as TextChannel | null;
 
+    await updateTicketStatus(ticket.id, 'closed').catch(console.error);
+
     if (channel?.isTextBased()) {
       const messages = await fetchAllMessages(channel);
       await saveTranscript({ ticketId: ticket.id, guildId: ticket.guild_id, messages }).catch(console.error);
-      await channel.send({ content: AUTO_CLOSE_TEXT }).catch(console.error);
+
+      // Archive (read-only + moved to Closed Tickets) instead of deleting — reopenable
+      await archiveTicketChannel(channel as TextChannel, channel.guild, ticket).catch(console.error);
+
+      const reopenRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId('reopen_ticket').setLabel('Reopen Ticket').setStyle(ButtonStyle.Success).setEmoji('🔄')
+      );
+      await channel.send({ content: AUTO_CLOSE_TEXT, components: [reopenRow] }).catch(console.error);
     }
 
-    await updateTicketStatus(ticket.id, 'closed').catch(console.error);
     await logToChannel(client, ticket.guild_id, autoCloseLogEmbed(ticket));
-    setTimeout(() => channel?.delete('Auto-closed: inactivity').catch(console.error), 3000);
 
     console.log(`[inactivity] Auto-closed ticket #${ticket.ticket_number}`);
   }
@@ -92,5 +109,23 @@ export async function checkInactiveTickets(client: Client): Promise<void> {
 
   if (toWarn.length + toClose.length === 0) {
     console.log('[inactivity] No inactive tickets found.');
+  }
+}
+
+// Physically delete archived ticket channels older than the retention window,
+// keeping channel counts bounded (Discord caps at 500/guild, 50/category).
+export async function cleanupArchivedTickets(client: Client): Promise<void> {
+  const tickets = await getArchivedTicketsToDelete(ARCHIVE_RETENTION_DAYS).catch(() => []);
+  if (tickets.length === 0) return;
+
+  console.log(`[cleanup] Deleting ${tickets.length} archived ticket channel(s)…`);
+
+  for (const ticket of tickets) {
+    if (!ticket.channel_id) continue;
+    const channel = await client.channels.fetch(ticket.channel_id).catch(() => null);
+    if (channel) {
+      await (channel as TextChannel).delete('Archived ticket cleanup').catch(console.error);
+    }
+    await markChannelDeleted(ticket.id).catch(console.error);
   }
 }
