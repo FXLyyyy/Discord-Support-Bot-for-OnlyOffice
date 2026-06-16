@@ -5,5 +5,3 @@ logs
 .env
 *.md
 .DS_Store
-migrations
-Test-Plan.docx

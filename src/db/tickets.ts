@@ -1,5 +1,5 @@
 import { q, one } from './client';
-import { Ticket, TicketStatus, TicketMessage, TicketStats } from '../types';
+import { Ticket, TicketStatus, TicketStats } from '../types';
 
 export async function createTicket(params: {
   guildId: string;
@@ -69,14 +69,6 @@ export async function reopenTicketRecord(ticketId: string, newChannelId: string)
   ))!;
 }
 
-export async function hasOpenTicket(guildId: string, userId: string): Promise<boolean> {
-  const row = await one(
-    `SELECT 1 FROM tickets WHERE guild_id = $1 AND user_id = $2 AND status IN ('open','claimed') LIMIT 1`,
-    [guildId, userId]
-  );
-  return !!row;
-}
-
 export async function getOpenTicketForUser(guildId: string, userId: string): Promise<Ticket | null> {
   return one<Ticket>(
     `SELECT * FROM tickets WHERE guild_id = $1 AND user_id = $2 AND status IN ('open','claimed')
@@ -99,13 +91,6 @@ export async function getUserPastTickets(
   return q<Ticket>(
     `SELECT * FROM tickets WHERE guild_id = $1 AND user_id = $2 ORDER BY ticket_number DESC`,
     [guildId, userId]
-  );
-}
-
-export async function getTicketMessages(ticketId: string): Promise<TicketMessage[]> {
-  return q<TicketMessage>(
-    'SELECT * FROM ticket_messages WHERE ticket_id = $1 ORDER BY created_at ASC',
-    [ticketId]
   );
 }
 
