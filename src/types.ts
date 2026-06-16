@@ -7,14 +7,6 @@ export interface ServerConfig {
   updated_at: string;
 }
 
-export interface Panel {
-  id: string;
-  guild_id: string;
-  channel_id: string;
-  message_id: string;
-  created_at: string;
-}
-
 export type TicketStatus = 'open' | 'claimed' | 'closed';
 
 export interface Ticket {
