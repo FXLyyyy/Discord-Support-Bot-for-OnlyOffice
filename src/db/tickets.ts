@@ -167,6 +167,25 @@ export async function hasOpenTicket(guildId: string, userId: string): Promise<bo
   return !!(data && data.length > 0);
 }
 
+// Returns the user's earlier tickets (most recent first), excluding one id.
+export async function getUserPastTickets(
+  guildId: string,
+  userId: string,
+  excludeTicketId?: string
+): Promise<Ticket[]> {
+  let query = supabase
+    .from('tickets')
+    .select('*')
+    .eq('guild_id', guildId)
+    .eq('user_id', userId)
+    .order('ticket_number', { ascending: false });
+
+  if (excludeTicketId) query = query.neq('id', excludeTicketId);
+
+  const { data } = await query;
+  return (data ?? []) as Ticket[];
+}
+
 // Returns the user's current live (open or claimed) ticket, if any.
 export async function getOpenTicketForUser(
   guildId: string,

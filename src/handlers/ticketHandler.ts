@@ -35,6 +35,7 @@ import {
   getNextTicketNumber,
   updateTicketStatus,
   getOpenTicketForUser,
+  getUserPastTickets,
   reopenTicketRecord,
   getTicketByChannel,
   getTicketByNumber,
@@ -407,7 +408,7 @@ export async function handleTicketModal(
     guild, config, member.id, interaction.client.user.id, ticketNumber, subject, category, member.user.tag,
   );
 
-  await createTicket({
+  const newTicket = await createTicket({
     guildId: guild.id,
     channelId: channel.id,
     userId: member.id,
@@ -419,15 +420,30 @@ export async function handleTicketModal(
 
   await postTicketIntro(channel, member.user, config, ticketNumber, subject, description, category);
 
-  // If this user has internal notes from previous tickets, warn staff privately
-  const priorNotes = await countUserInternalNotes(guild.id, member.id).catch(() => 0);
-  if (priorNotes > 0) {
+  // Returning-user briefing: list past tickets (with transcript links) for staff
+  const [pastTickets, priorNotes] = await Promise.all([
+    getUserPastTickets(guild.id, member.id, newTicket.id).catch(() => []),
+    countUserInternalNotes(guild.id, member.id).catch(() => 0),
+  ]);
+
+  if (pastTickets.length > 0) {
+    const lines = pastTickets.slice(0, 10).map(t => {
+      const link = t.transcript_url ? ` — [transcript](${t.transcript_url})` : '';
+      const state = t.status === 'closed' ? '' : ' *(open)*';
+      return `• **#${t.ticket_number}** — "${t.subject}"${state}${link}`;
+    });
+    if (pastTickets.length > 10) lines.push(`…and ${pastTickets.length - 10} more`);
+
+    const noteLine = priorNotes > 0
+      ? `\nThey also have **${priorNotes}** internal note(s) on record.`
+      : '';
+
     const thread = await ensureStaffThread(channel, config, ticketNumber);
     await thread
       ?.send({
         content:
-          `⚠️ **Heads-up:** <@${member.id}> has **${priorNotes}** internal note(s) on previous tickets. ` +
-          `Check earlier transcripts or /ticket-info for context.`,
+          `🔁 **Returning user.** <@${member.id}> has contacted us before — ` +
+          `**${pastTickets.length}** previous ticket(s):\n${lines.join('\n')}${noteLine}`,
         allowedMentions: { parse: [] },
       })
       .catch(() => null);
