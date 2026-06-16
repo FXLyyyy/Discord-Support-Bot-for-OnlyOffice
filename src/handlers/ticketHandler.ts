@@ -430,6 +430,8 @@ export async function handleTicketModal(
       `✅ **Your ticket is open!** Head over to ${channel}.\n` +
       `Our support team has been notified and will be with you shortly. 🙌`,
   });
+  // Auto-dismiss this ephemeral confirmation so the user doesn't have to
+  setTimeout(() => interaction.deleteReply().catch(() => null), 6000);
 
   await logToChannel(
     interaction.client,
