@@ -37,8 +37,12 @@ export function generateTranscriptHtml(params: {
   openedByTag: string;
   agentTag: string | null;
   guildName: string;
+  /** When false, internal-only content (close reason, staff notes) is omitted. */
+  includeInternal?: boolean;
 }): string {
-  const { ticket, messages, notes = [], openedByTag, agentTag, guildName } = params;
+  const { ticket, messages, openedByTag, agentTag, guildName } = params;
+  const includeInternal = params.includeInternal !== false;
+  const notes = includeInternal ? (params.notes ?? []) : [];
 
   // Always show the original ticket submission at the top
   const submissionBlock = `
@@ -52,16 +56,17 @@ export function generateTranscriptHtml(params: {
 
   let body = submissionBlock;
 
-  // Resolution + internal close reason (staff-facing document)
-  if (ticket.resolution || ticket.close_reason) {
+  // Resolution (shared with the user) + internal close reason (staff-only)
+  const showReason = includeInternal && ticket.close_reason;
+  if (ticket.resolution || showReason) {
     body += `
 <div class="submission resolution">
   <div class="sub-label">✅ RESOLUTION</div>`;
     if (ticket.resolution) {
       body += `<div class="sub-desc">${esc(ticket.resolution)}</div>`;
     }
-    if (ticket.close_reason) {
-      body += `<div class="sub-row" style="margin-top:8px"><span class="sub-key">Reason</span><span class="sub-val">${esc(ticket.close_reason)}</span></div>`;
+    if (showReason) {
+      body += `<div class="sub-row" style="margin-top:8px"><span class="sub-key">Reason</span><span class="sub-val">${esc(ticket.close_reason as string)}</span></div>`;
     }
     body += `</div>`;
   }

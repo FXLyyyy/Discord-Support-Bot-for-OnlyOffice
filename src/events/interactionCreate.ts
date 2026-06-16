@@ -101,7 +101,7 @@ export async function execute(interaction: Interaction): Promise<void> {
       return;
     }
 
-    await saveRating(ticketId, rating).catch(console.error);
+    await saveRating(ticketId, rating, btn.user.id).catch(console.error);
 
     await btn.update({
       embeds: [
@@ -123,6 +123,7 @@ export async function execute(interaction: Interaction): Promise<void> {
 
   const config = await ensureServerConfig(btn.guildId!);
 
+  try {
   switch (btn.customId) {
     case 'open_ticket':
       await openTicket(btn, config);
@@ -167,5 +168,13 @@ export async function execute(interaction: Interaction): Promise<void> {
 
     default:
       break;
+  }
+  } catch (err) {
+    console.error(`[button] ${btn.customId} error:`, err);
+    const payload = { content: '❌ Something went wrong. Please try again.', ephemeral: true as const };
+    (btn.replied || btn.deferred
+      ? btn.followUp(payload)
+      : btn.reply(payload)
+    ).catch(() => null);
   }
 }

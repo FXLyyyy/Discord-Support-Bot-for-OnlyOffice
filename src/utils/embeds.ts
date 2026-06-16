@@ -93,18 +93,13 @@ export function configViewEmbed(config: ServerConfig): EmbedBuilder {
     ? config.support_role_ids.map(id => `<@&${id}>`).join(', ')
     : 'None';
 
-  const autoThreads = config.auto_thread_channel_ids.length
-    ? config.auto_thread_channel_ids.map(id => `<#${id}>`).join(', ')
-    : 'None';
-
   return new EmbedBuilder()
     .setTitle('⚙️ Server Configuration')
     .setColor(Colors.Blue)
     .addFields(
       { name: 'Support Roles', value: roles, inline: false },
       { name: 'Log Channel', value: config.log_channel_id ? `<#${config.log_channel_id}>` : 'Not set', inline: true },
-      { name: 'Ticket Category', value: config.ticket_category_id ? `<#${config.ticket_category_id}>` : 'Not set', inline: true },
-      { name: 'Auto-Thread Channels', value: autoThreads, inline: false }
+      { name: 'Ticket Category', value: config.ticket_category_id ? `<#${config.ticket_category_id}>` : 'Not set', inline: true }
     )
     .setTimestamp();
 }

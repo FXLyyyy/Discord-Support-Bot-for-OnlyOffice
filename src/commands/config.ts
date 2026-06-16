@@ -45,30 +45,6 @@ export const data = new SlashCommandBuilder()
       .setName('remove-support-role')
       .setDescription('Remove a support role')
       .addRoleOption(o => o.setName('role').setDescription('Support role').setRequired(true))
-  )
-  .addSubcommand(sub =>
-    sub
-      .setName('add-auto-thread-channel')
-      .setDescription('Add a channel that gets auto-threads on every message')
-      .addChannelOption(o =>
-        o
-          .setName('channel')
-          .setDescription('Channel to enable auto-threads in')
-          .addChannelTypes(ChannelType.GuildText)
-          .setRequired(true)
-      )
-  )
-  .addSubcommand(sub =>
-    sub
-      .setName('remove-auto-thread-channel')
-      .setDescription('Disable auto-threads in a channel')
-      .addChannelOption(o =>
-        o
-          .setName('channel')
-          .setDescription('Channel to disable auto-threads in')
-          .addChannelTypes(ChannelType.GuildText)
-          .setRequired(true)
-      )
   );
 
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
@@ -130,30 +106,6 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
         support_role_ids: config.support_role_ids.filter(id => id !== role.id),
       });
       await interaction.reply({ embeds: [successEmbed(`Removed ${role} from support roles.`)], ephemeral: true });
-      break;
-    }
-
-    case 'add-auto-thread-channel': {
-      const channel = interaction.options.getChannel('channel', true);
-      const config = await ensureServerConfig(guildId);
-      if (config.auto_thread_channel_ids.includes(channel.id)) {
-        await interaction.reply({ embeds: [errorEmbed(`${channel} already has auto-threads enabled.`)], ephemeral: true });
-        return;
-      }
-      await upsertServerConfig(guildId, {
-        auto_thread_channel_ids: [...config.auto_thread_channel_ids, channel.id],
-      });
-      await interaction.reply({ embeds: [successEmbed(`Auto-threads enabled in ${channel}.`)], ephemeral: true });
-      break;
-    }
-
-    case 'remove-auto-thread-channel': {
-      const channel = interaction.options.getChannel('channel', true);
-      const config = await ensureServerConfig(guildId);
-      await upsertServerConfig(guildId, {
-        auto_thread_channel_ids: config.auto_thread_channel_ids.filter(id => id !== channel.id),
-      });
-      await interaction.reply({ embeds: [successEmbed(`Auto-threads disabled in ${channel}.`)], ephemeral: true });
       break;
     }
 

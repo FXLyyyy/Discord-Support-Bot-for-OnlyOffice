@@ -40,7 +40,7 @@ import {
   getTicketByNumber,
   setTranscriptUrl,
 } from '../db/tickets';
-import { getTicketNotes } from '../db/notes';
+import { getTicketNotes, countUserInternalNotes } from '../db/notes';
 import { saveTranscript } from '../db/transcripts';
 import {
   ticketWelcomeEmbed,
@@ -419,6 +419,20 @@ export async function handleTicketModal(
 
   await postTicketIntro(channel, member.user, config, ticketNumber, subject, description, category);
 
+  // If this user has internal notes from previous tickets, warn staff privately
+  const priorNotes = await countUserInternalNotes(guild.id, member.id).catch(() => 0);
+  if (priorNotes > 0) {
+    const thread = await ensureStaffThread(channel, config, ticketNumber);
+    await thread
+      ?.send({
+        content:
+          `⚠️ **Heads-up:** <@${member.id}> has **${priorNotes}** internal note(s) on previous tickets. ` +
+          `Check earlier transcripts or /ticket-info for context.`,
+        allowedMentions: { parse: [] },
+      })
+      .catch(() => null);
+  }
+
   await interaction.editReply({
     content:
       `✅ **Your ticket is open!** Head over to ${channel}.\n` +
@@ -536,14 +550,14 @@ export async function closeTicket(
   }
   await logToChannel(interaction.client, guild.id, closeEmbed, staffFile);
 
-  // Customer transcript (NO internal notes) → DM
+  // Customer transcript — internal notes AND internal close reason stripped
   const customerHtml = generateTranscriptHtml({
     ticket: closedTicket,
     messages: transcriptMessages,
-    notes: [], // never expose internal notes to the user
     openedByTag: openerTag,
     agentTag,
     guildName: guild.name,
+    includeInternal: false,
   });
   const customerFile = new AttachmentBuilder(Buffer.from(customerHtml, 'utf-8'), {
     name: `transcript-ticket-${ticket.ticket_number}.html`,
@@ -696,17 +710,6 @@ export async function reopenTicket(
 
   const guild = interaction.guild!;
 
-  // Respect the one-live-ticket limit for the original opener
-  const existing = await getOpenTicketForUser(guild.id, ticket.user_id);
-  if (existing && existing.id !== ticket.id) {
-    await interaction.editReply({
-      content:
-        `⚠️ <@${ticket.user_id}> already has a live ticket (<#${existing.channel_id}>). ` +
-        `Close it before reopening **#${ticket.ticket_number}**.`,
-    });
-    return;
-  }
-
   const channel = await performReopen(interaction.client, guild, config, ticket);
 
   await interaction.editReply({
@@ -745,14 +748,6 @@ export async function handleReopenButton(
   }
   if (ticket.user_id !== member.id && !isSupportMember(member, config)) {
     await interaction.editReply({ content: '❌ Only the ticket owner or support staff can reopen this ticket.' });
-    return;
-  }
-
-  const existing = await getOpenTicketForUser(guild.id, ticket.user_id);
-  if (existing && existing.id !== ticket.id) {
-    await interaction.editReply({
-      content: `⚠️ There is already a live ticket open: <#${existing.channel_id}>. Please continue there.`,
-    });
     return;
   }
 
@@ -820,14 +815,6 @@ export async function handlePanelReopen(
 
   if (ticket.status !== 'closed') {
     await interaction.editReply({ content: `That ticket is still open: <#${ticket.channel_id}>` });
-    return;
-  }
-
-  const existing = await getOpenTicketForUser(guild.id, ticket.user_id);
-  if (existing && existing.id !== ticket.id) {
-    await interaction.editReply({
-      content: `⚠️ There's already a live ticket open: <#${existing.channel_id}>. Please continue there.`,
-    });
     return;
   }
 

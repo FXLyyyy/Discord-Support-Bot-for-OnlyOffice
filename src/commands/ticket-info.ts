@@ -1,5 +1,6 @@
 import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder, Colors, TextChannel, GuildMember } from 'discord.js';
 import { getTicketByChannel } from '../db/tickets';
+import { countTicketNotes, countUserInternalNotes } from '../db/notes';
 import { getServerConfig } from '../db/servers';
 import { errorEmbed } from '../utils/embeds';
 import { isSupportMember } from '../utils/permissions';
@@ -58,6 +59,24 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
 
   if (ticket.rating) {
     fields.push({ name: 'Rating', value: `${'⭐'.repeat(ticket.rating)} (${ticket.rating}/5)`, inline: true });
+  }
+
+  // Internal-note indicators
+  const [ticketNotes, userNotes] = await Promise.all([
+    countTicketNotes(ticket.id),
+    countUserInternalNotes(interaction.guildId!, ticket.user_id),
+  ]);
+  fields.push({
+    name: '🗒️ Internal notes',
+    value: ticketNotes > 0 ? `${ticketNotes} in this ticket` : 'None in this ticket',
+    inline: true,
+  });
+  if (userNotes > ticketNotes) {
+    fields.push({
+      name: '⚠️ This user',
+      value: `Has **${userNotes}** internal note(s) across their tickets`,
+      inline: true,
+    });
   }
 
   const embed = new EmbedBuilder()

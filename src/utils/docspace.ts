@@ -33,11 +33,20 @@ export async function uploadTranscript(
     form.append('createNewIfExist', 'true');
     form.append('file', new Blob([html], { type: 'text/html' }), filename);
 
-    const res = await fetch(`${BASE}/api/2.0/files/${FOLDER_ID}/insert`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${API_KEY}` },
-      body: form,
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+
+    let res: Response;
+    try {
+      res = await fetch(`${BASE}/api/2.0/files/${FOLDER_ID}/insert`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${API_KEY}` },
+        body: form,
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
 
     if (!res.ok) {
       console.error(`[docspace] upload failed: HTTP ${res.status}`);

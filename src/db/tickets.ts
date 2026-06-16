@@ -210,11 +210,33 @@ export async function markInactivityWarned(ticketId: string): Promise<void> {
     .eq('id', ticketId);
 }
 
-export async function saveRating(ticketId: string, rating: number): Promise<void> {
+export async function saveRating(
+  ticketId: string,
+  rating: number,
+  ratedByUserId?: string
+): Promise<void> {
+  // Keep the latest rating on the ticket (used by /stats averages)
   await supabase
     .from('tickets')
     .update({ rating, rated_at: new Date().toISOString() })
     .eq('id', ticketId);
+
+  // Also log it in the dedicated ratings table
+  const { data } = await supabase
+    .from('tickets')
+    .select('guild_id, ticket_number, user_id')
+    .eq('id', ticketId)
+    .single();
+
+  if (data) {
+    await supabase.from('ticket_ratings').insert({
+      ticket_id: ticketId,
+      guild_id: data.guild_id,
+      ticket_number: data.ticket_number,
+      rated_by: ratedByUserId ?? data.user_id,
+      rating,
+    });
+  }
 }
 
 export async function getTicketsForInactivityCheck(): Promise<{
