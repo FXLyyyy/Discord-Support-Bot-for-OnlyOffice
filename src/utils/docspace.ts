@@ -58,6 +58,35 @@ export async function createTicketFolder(title: string): Promise<DocSpaceFolder 
   }
 }
 
+/** Finds a subfolder by title under a parent folder, creating it if missing. */
+export async function ensureSubfolder(parentId: number | string, title: string): Promise<number | null> {
+  if (!isDocSpaceConfigured()) return null;
+  try {
+    const list = await withTimeout(signal =>
+      fetch(`${BASE}/api/2.0/files/${parentId}`, { headers: authHeaders(), signal })
+    );
+    if (list.ok) {
+      const data = (await list.json()) as { response?: { folders?: Array<{ id: number; title: string }> } };
+      const existing = data.response?.folders?.find(f => f.title === title);
+      if (existing) return existing.id;
+    }
+    const created = await withTimeout(signal =>
+      fetch(`${BASE}/api/2.0/files/folder/${parentId}`, {
+        method: 'POST',
+        headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title }),
+        signal,
+      })
+    );
+    if (!created.ok) { console.error(`[docspace] subfolder create failed: HTTP ${created.status}`); return null; }
+    const d = (await created.json()) as { response?: { id?: number } };
+    return d.response?.id ?? null;
+  } catch (err) {
+    console.error('[docspace] ensureSubfolder error:', err);
+    return null;
+  }
+}
+
 /** Uploads an in-memory buffer as a file into a specific folder. */
 export async function uploadBufferToFolder(
   folderId: number,

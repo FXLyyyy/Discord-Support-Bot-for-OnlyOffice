@@ -6,6 +6,8 @@ import { join } from 'path';
 import { Command } from './types';
 import { checkInactiveTickets, cleanupArchivedTickets } from './handlers/inactivityHandler';
 import { loadActiveTicketChannels } from './cache';
+import { runDatabaseBackup } from './utils/backup';
+import { isDocSpaceConfigured } from './utils/docspace';
 
 config();
 
@@ -91,6 +93,15 @@ client.once('ready', async () => {
     cleanupArchivedTickets(client).catch(console.error);
   }, 24 * 60 * 60 * 1000);
   console.log(`[cleanup] Archived-ticket cleanup scheduled daily`);
+
+  // Scheduled database backup to DocSpace (default every 24h; 0 disables)
+  const backupHours = Number(process.env.BACKUP_INTERVAL_HOURS ?? 24);
+  if (isDocSpaceConfigured() && backupHours > 0) {
+    setInterval(() => {
+      runDatabaseBackup().catch(console.error);
+    }, backupHours * 60 * 60 * 1000);
+    console.log(`[backup] Database backup scheduled every ${backupHours}h`);
+  }
 
   console.log(`[bot] Logged in as ${client.user?.tag}`);
 });
