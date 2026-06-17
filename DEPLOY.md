@@ -56,15 +56,3 @@ docker compose exec postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup
 
 The database port is **not** exposed outside the Compose network. To inspect it,
 either add an `adminer` service or temporarily map a port.
-
-## If your server is behind a TLS-inspecting proxy
-
-A normal server/VM needs nothing extra. Only if outbound HTTPS is intercepted
-(error: `unable to get local issuer certificate`):
-
-1. Put the corporate root CA at `./certs/corp-root-ca.pem`.
-2. In `docker-compose.yml` uncomment the `NODE_EXTRA_CA_CERTS` env line and the
-   `./certs` volume mount under the `bot` service.
-3. `docker compose up -d --build`.
-
-Do **not** disable TLS verification in production.

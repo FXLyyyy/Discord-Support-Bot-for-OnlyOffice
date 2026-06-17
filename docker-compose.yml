@@ -31,12 +31,8 @@ services:
       DOCSPACE_BASE_URL: ${DOCSPACE_BASE_URL:-}
       DOCSPACE_API_KEY: ${DOCSPACE_API_KEY:-}
       DOCSPACE_TRANSCRIPTS_FOLDER_ID: ${DOCSPACE_TRANSCRIPTS_FOLDER_ID:-}
-      # If your server sits behind a TLS-inspecting proxy, mount the corporate
-      # root CA and uncomment the next line (see DEPLOY.md):
-      # NODE_EXTRA_CA_CERTS: /certs/corp-root-ca.pem
     volumes:
       - ./logs:/app/logs
-      # - ./certs:/certs:ro   # uncomment alongside NODE_EXTRA_CA_CERTS above
 
 volumes:
   pgdata:
