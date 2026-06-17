@@ -1,5 +1,5 @@
 import { spawn } from 'child_process';
-import { isDocSpaceConfigured, ensureSubfolder, uploadBufferToFolder } from './docspace';
+import { isDocSpaceConfigured, ensureSubfolder, ensureRootFolder, uploadBufferToFolder } from './docspace';
 
 const BACKUPS_FOLDER_NAME = 'Database Backups';
 
@@ -48,16 +48,15 @@ export async function runDatabaseBackup(): Promise<void> {
 
   const stamp = new Date().toISOString();
   const day = stamp.slice(0, 10);
-  const root = process.env.DOCSPACE_TRANSCRIPTS_FOLDER_ID!;
 
-  const backupsId = await ensureSubfolder(root, BACKUPS_FOLDER_NAME);
-  if (!backupsId) { console.error('[backup] could not create the Database Backups folder'); return; }
+  const backups = await ensureRootFolder(BACKUPS_FOLDER_NAME);
+  if (!backups) { console.error('[backup] could not create the Database Backups folder'); return; }
 
-  const dayId = await ensureSubfolder(backupsId, day);
-  if (!dayId) { console.error('[backup] could not create the dated folder'); return; }
+  const dayFolder = await ensureSubfolder(backups.folderId, day);
+  if (!dayFolder) { console.error('[backup] could not create the dated folder'); return; }
 
   const filename = `db-backup-${stamp.replace(/[:.]/g, '-')}.sql`;
-  const uploaded = await uploadBufferToFolder(dayId, filename, dump, 'application/sql');
+  const uploaded = await uploadBufferToFolder(dayFolder.folderId, filename, dump, 'application/sql');
   console.log(uploaded
     ? `[backup] uploaded ${filename} (${dump.length} bytes) to DocSpace`
     : '[backup] upload to DocSpace failed');
