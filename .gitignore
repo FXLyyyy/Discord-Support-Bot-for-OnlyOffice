@@ -4,3 +4,5 @@ dist/
 *.js.map
 .DS_Store
 logs/
+*.docx
+.~lock.*#
