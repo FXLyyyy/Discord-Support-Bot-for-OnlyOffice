@@ -1,6 +1,5 @@
 import './utils/fileLogger'; // must be first — patches console + captures crashes
 import { Client, GatewayIntentBits, Partials, Collection, REST, Routes } from 'discord.js';
-import { config } from 'dotenv';
 import { readdirSync } from 'fs';
 import { join } from 'path';
 import { Command } from './types';
@@ -9,7 +8,8 @@ import { loadActiveTicketChannels } from './cache';
 import { runDatabaseBackup } from './utils/backup';
 import { isDocSpaceConfigured } from './utils/docspace';
 
-config();
+// Env is loaded by Node's native --env-file flag (see package.json scripts);
+// docker-compose injects vars directly. No dotenv dependency needed.
 
 if (!process.env.DISCORD_TOKEN) {
   throw new Error('Missing DISCORD_TOKEN environment variable');
