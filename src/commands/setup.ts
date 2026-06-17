@@ -80,10 +80,14 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
       await guild.channels.create({ name: 'Closed Tickets', type: ChannelType.GuildCategory, permissionOverwrites: staffOnly });
     }
 
-    // 3) Staff-only log channel
+    // 3) Parent "Support" category for the panel + log channels
+    const supportCat = findCategory(guild, 'Support')
+      ?? await guild.channels.create({ name: 'Support', type: ChannelType.GuildCategory });
+
+    // 4) Staff-only log channel (under the Support category)
     const logs = findText(guild, 'ticket-logs')
       ?? await guild.channels.create({
-        name: 'ticket-logs', type: ChannelType.GuildText,
+        name: 'ticket-logs', type: ChannelType.GuildText, parent: supportCat.id,
         permissionOverwrites: [
           { id: everyone, deny: [F.ViewChannel] },
           { id: botId, allow: [F.ViewChannel, F.SendMessages, F.EmbedLinks, F.AttachFiles, F.ReadMessageHistory] },
@@ -92,12 +96,12 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
         ],
       });
 
-    // 4) Public, read-only panel channel
+    // 5) Public, read-only panel channel (under the Support category)
     let panelCh = findText(guild, 'create-ticket');
     const panelChannelIsNew = !panelCh;
     if (!panelCh) {
       panelCh = await guild.channels.create({
-        name: 'create-ticket', type: ChannelType.GuildText,
+        name: 'create-ticket', type: ChannelType.GuildText, parent: supportCat.id,
         permissionOverwrites: [
           { id: everyone, allow: [F.ViewChannel, F.ReadMessageHistory], deny: [F.SendMessages, F.AddReactions, F.CreatePublicThreads, F.CreatePrivateThreads, F.SendMessagesInThreads] },
           { id: botId, allow: [F.ViewChannel, F.SendMessages, F.EmbedLinks] },

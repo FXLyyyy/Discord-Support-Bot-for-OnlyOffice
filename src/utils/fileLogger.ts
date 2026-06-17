@@ -62,7 +62,10 @@ process.on('unhandledRejection', (reason) => {
 });
 process.on('uncaughtException', (err) => {
   write('UNCAUGHT_EXCEPTION', [err]);
-  original.error('[fileLogger] uncaughtException:', err);
+  original.error('[fileLogger] uncaughtException — exiting for a clean restart:', err);
+  // The process state is now undefined; exit so Docker (restart: unless-stopped)
+  // brings up a fresh, healthy process. The synchronous write above already flushed.
+  process.exit(1);
 });
 
 console.log(`[fileLogger] Logging to ${logFilePath()}`);

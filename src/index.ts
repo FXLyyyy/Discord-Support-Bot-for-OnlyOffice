@@ -97,10 +97,13 @@ client.once('ready', async () => {
   // Scheduled database backup to DocSpace (default every 24h; 0 disables)
   const backupHours = Number(process.env.BACKUP_INTERVAL_HOURS ?? 24);
   if (isDocSpaceConfigured() && backupHours > 0) {
+    // First backup 10 min after startup, so frequent restarts don't keep
+    // postponing it; then on the regular interval.
+    setTimeout(() => runDatabaseBackup().catch(console.error), 10 * 60 * 1000);
     setInterval(() => {
       runDatabaseBackup().catch(console.error);
     }, backupHours * 60 * 60 * 1000);
-    console.log(`[backup] Database backup scheduled every ${backupHours}h`);
+    console.log(`[backup] Database backup scheduled every ${backupHours}h (first run in ~10 min)`);
   }
 
   console.log(`[bot] Logged in as ${client.user?.tag}`);

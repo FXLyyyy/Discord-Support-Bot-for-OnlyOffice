@@ -36,8 +36,10 @@ import {
   reopenTicketRecord,
   getTicketByChannel,
   getTicketByNumber,
+  getTicketById,
   setTranscriptUrl,
 } from '../db/tickets';
+import { getServerConfig } from '../db/servers';
 import { getTicketNotes } from '../db/notes';
 import { getUserNotes } from '../db/userNotes';
 import { addTicketChannel, removeTicketChannel } from '../cache';
@@ -109,11 +111,13 @@ async function buildTicketChannel(
     PermissionsBitField.Flags.EmbedLinks,
   ]);
 
+  // Both agent and admin roles get staff access to ticket channels
+  const staffRoleIds = [...new Set([...(config.admin_role_ids ?? []), ...config.support_role_ids])];
   const permissionOverwrites = [
     { id: guild.roles.everyone.id, deny: PermissionsBitField.Flags.ViewChannel },
     { id: ownerId, allow: userAllow },
     { id: botId, allow: botAllow },
-    ...config.support_role_ids.map(roleId => ({ id: roleId, allow: staffAllow })),
+    ...staffRoleIds.map(roleId => ({ id: roleId, allow: staffAllow })),
   ];
 
   const channel = await guild.channels.create({
@@ -277,9 +281,9 @@ export async function ensureStaffThread(
 
   if (!created) return null;
 
-  // Add all support-staff members so they can see the private thread
+  // Add all staff (agents + admins) so they can see the private thread
   const ids = new Set<string>();
-  for (const roleId of config.support_role_ids) {
+  for (const roleId of [...(config.admin_role_ids ?? []), ...config.support_role_ids]) {
     channel.guild.roles.cache.get(roleId)?.members.forEach(m => ids.add(m.id));
   }
   for (const id of ids) {
@@ -632,19 +636,24 @@ export async function closeTicket(
       )
     );
 
+    // Reopen-from-DM button (resolves the server from the ticket on click)
+    const dmReopenRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(`reopen_dm:${ticket.id}`).setLabel('Reopen Ticket').setStyle(ButtonStyle.Success).setEmoji('🔄')
+    );
+
     const dmLines = [`🔒 Your ticket **#${ticket.ticket_number} — ${ticket.subject}** has been closed.`];
     if (resolution) dmLines.push('', '**Resolution from our team:**', `>>> ${resolution}`);
     dmLines.push(
       '',
       `A full transcript is attached for your records. Thanks for contacting **OnlyOffice Support**! ` +
-      `If you have a moment, we'd love to know how we did — just tap a rating below. ⭐`
+      `If you need more help you can reopen this ticket below, or rate how we did. ⭐`
     );
 
     await openerUser
       .send({
         content: dmLines.join('\n'),
         files: customerFile ? [customerFile] : [],
-        components: [ratingRow],
+        components: [ratingRow, dmReopenRow],
       })
       .catch(() => null); // DMs may be disabled
   }
@@ -810,6 +819,37 @@ export async function handleReopenButton(
       ticketOpenEmbed(member.user, ticket.ticket_number, channel.id, `(reopened) ${ticket.subject}`)
     );
   }
+}
+
+// Reopen button inside the closure DM (no guild context — resolve it from the ticket)
+export async function handleDmReopenButton(interaction: ButtonInteraction, ticketId: string): Promise<void> {
+  await interaction.deferReply().catch(() => null);
+
+  const ticket = await getTicketById(ticketId);
+  if (!ticket) {
+    await interaction.editReply({ content: '❌ Ticket not found.' }).catch(() => null);
+    return;
+  }
+  if (ticket.user_id !== interaction.user.id) {
+    await interaction.editReply({ content: '❌ This ticket is not yours.' }).catch(() => null);
+    return;
+  }
+  if (ticket.status !== 'closed') {
+    await interaction.editReply({ content: 'This ticket is already open.' }).catch(() => null);
+    return;
+  }
+
+  const guild = await interaction.client.guilds.fetch(ticket.guild_id).catch(() => null);
+  const config = guild ? await getServerConfig(ticket.guild_id) : null;
+  if (!guild || !config) {
+    await interaction.editReply({ content: '❌ That server is currently unavailable. Please try again later.' }).catch(() => null);
+    return;
+  }
+
+  const channel = await performReopen(interaction.client, guild, config, ticket);
+  await interaction.editReply({
+    content: channel ? `🔄 Reopened — head over to ${channel}.` : '❌ Could not reopen this ticket.',
+  }).catch(() => null);
 }
 
 // Panel "Reopen a ticket" button → modal asking for the ticket number

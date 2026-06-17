@@ -15,6 +15,7 @@ import {
   handleTicketModal,
   showCloseModal,
   handleReopenButton,
+  handleDmReopenButton,
   showPanelReopenModal,
   handlePanelReopen,
 } from '../handlers/ticketHandler';
@@ -120,6 +121,13 @@ export async function execute(interaction: Interaction): Promise<void> {
       ],
       components: [],
     });
+    return;
+  }
+
+  // Reopen-from-DM button also arrives without a guild — handle BEFORE the guild guard
+  if (btn.customId.startsWith('reopen_dm:')) {
+    const [, ticketId] = btn.customId.split(':');
+    await handleDmReopenButton(btn, ticketId).catch(err => console.error('[reopen_dm] error:', err));
     return;
   }
 
