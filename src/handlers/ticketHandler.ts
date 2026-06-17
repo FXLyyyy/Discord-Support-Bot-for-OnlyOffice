@@ -53,6 +53,7 @@ import {
 import { logToChannel } from '../utils/logger';
 import { isSupportMember } from '../utils/permissions';
 import { generateTranscriptHtml } from '../utils/transcriptHtml';
+import { generateTranscriptDocx } from '../utils/transcriptDocx';
 import { createTicketFolder, uploadBufferToFolder, uploadUrlToFolder } from '../utils/docspace';
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
@@ -567,14 +568,21 @@ export async function closeTicket(
   const folder = await createTicketFolder(`Ticket #${ticket.ticket_number} — ${openerTag}`);
   if (folder) {
     folderUrl = folder.webUrl;
-    // Archive the staff HTML we already generated above (includes internal notes).
-    // DocSpace stores/previews HTML directly — no PDF toolchain required.
-    await uploadBufferToFolder(
-      folder.folderId,
-      `ticket-${ticket.ticket_number}-transcript.html`,
-      Buffer.from(htmlContent, 'utf-8'),
-      'text/html',
-    ).catch(() => null);
+    // Archive a native .docx — OnlyOffice/DocSpace renders Word documents with
+    // full fidelity, whereas uploaded HTML gets mangled by its converter.
+    // Staff copy: internal notes + internal close reason included.
+    const staffDocx = await generateTranscriptDocx({
+      ticket: closedTicket, messages: transcriptMessages, notes,
+      openedByTag: openerTag, agentTag, guildName: guild.name, includeInternal: true,
+    }).catch(() => null);
+    if (staffDocx) {
+      await uploadBufferToFolder(
+        folder.folderId,
+        `ticket-${ticket.ticket_number}-transcript.docx`,
+        staffDocx,
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      ).catch(() => null);
+    }
     // Relay every user attachment into the same folder
     for (const m of transcriptMessages) {
       for (const a of m.attachments) {
