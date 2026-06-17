@@ -5,7 +5,8 @@ export async function logToChannel(
   client: Client,
   guildId: string,
   embed: EmbedBuilder,
-  attachment?: AttachmentBuilder
+  attachment?: AttachmentBuilder,
+  content?: string
 ): Promise<void> {
   const config = await getServerConfig(guildId);
   if (!config?.log_channel_id) {
@@ -27,6 +28,7 @@ export async function logToChannel(
 
   const payload: Parameters<TextChannel['send']>[0] = { embeds: [embed] };
   if (attachment) payload.files = [attachment];
+  if (content) payload.content = content;
 
   await (channel as TextChannel).send(payload).catch((err) =>
     console.error('[logger] Failed to send log embed:', err)

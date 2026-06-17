@@ -567,10 +567,18 @@ export async function closeTicket(
     name: `transcript-ticket-${ticket.ticket_number}.html`,
   });
   const closeEmbed = ticketCloseEmbed(member.user, closedTicket, transcriptMessages.length);
+  // Header lines shown above the embed in #ticket-logs. Always names the ticket
+  // and opener; includes the canonical DocSpace folder link when archival is on.
+  const logLines = [
+    `📄 **Transcript of ticket #${ticket.ticket_number}** from <@${ticket.user_id}>`,
+  ];
   if (folderUrl) {
+    logLines.push(`📁 Link to DocSpace folder: ${folderUrl}`);
     closeEmbed.addFields({ name: '📁 Transcript folder (DocSpace)', value: `[Open in DocSpace](${folderUrl})` });
+  } else {
+    logLines.push('⚠️ DocSpace not configured — no folder link (HTML transcript attached below).');
   }
-  await logToChannel(interaction.client, guild.id, closeEmbed, staffFile);
+  await logToChannel(interaction.client, guild.id, closeEmbed, staffFile, logLines.join('\n'));
 
   // Customer transcript — internal notes AND internal close reason stripped
   const customerHtml = generateTranscriptHtml({
