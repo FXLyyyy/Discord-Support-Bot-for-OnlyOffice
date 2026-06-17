@@ -1,11 +1,9 @@
-# syntax=docker/dockerfile:1.7
 # ---- build stage ----
 FROM node:20-alpine AS build
 WORKDIR /app
+ENV NPM_CONFIG_UPDATE_NOTIFIER=false NPM_CONFIG_FUND=false NPM_CONFIG_AUDIT=false CI=true
 COPY package*.json ./
-# Cache-mount the npm download cache so repeat builds skip re-fetching tarballs.
-RUN --mount=type=cache,target=/root/.npm \
-    npm ci --no-audit --no-fund
+RUN npm ci
 COPY tsconfig.json ./
 COPY src ./src
 RUN npm run build
@@ -13,12 +11,11 @@ RUN npm run build
 # ---- runtime stage ----
 FROM node:20-alpine
 WORKDIR /app
-ENV NODE_ENV=production
+ENV NODE_ENV=production NPM_CONFIG_UPDATE_NOTIFIER=false NPM_CONFIG_FUND=false NPM_CONFIG_AUDIT=false CI=true
 # pg_dump for scheduled database backups (client >= server is fine)
 RUN apk add --no-cache postgresql-client
 COPY package*.json ./
-RUN --mount=type=cache,target=/root/.npm \
-    npm ci --omit=dev --no-audit --no-fund
+RUN npm ci --omit=dev
 COPY --from=build /app/dist ./dist
 RUN mkdir -p /app/logs
 # Env is injected by docker-compose, so no --env-file here.
