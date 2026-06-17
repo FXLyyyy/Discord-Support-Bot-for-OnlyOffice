@@ -4,16 +4,11 @@ import {
   getTicketsForInactivityCheck,
   markInactivityWarned,
   updateTicketStatus,
-  getArchivedTicketsToDelete,
-  markChannelDeleted,
 } from '../db/tickets';
 import { saveTranscript } from '../db/transcripts';
 import { logToChannel } from '../utils/logger';
 import { removeTicketChannel } from '../cache';
 import { Ticket, TicketMessage } from '../types';
-
-// How long archived ticket channels are kept before being physically deleted.
-export const ARCHIVE_RETENTION_DAYS = 30;
 
 const INACTIVITY_WARN_TEXT =
   '⏰ **Just checking in!** This ticket has been quiet for **24 hours**.\n' +
@@ -36,7 +31,7 @@ function autoCloseLogEmbed(ticket: Ticket): EmbedBuilder {
     .setTimestamp();
 }
 
-async function fetchAllMessages(channel: TextChannel): Promise<TicketMessage[]> {
+export async function fetchAllMessages(channel: TextChannel): Promise<TicketMessage[]> {
   const all: TicketMessage[] = [];
   let lastId: string | undefined;
 
@@ -111,23 +106,5 @@ export async function checkInactiveTickets(client: Client): Promise<void> {
 
   if (toWarn.length + toClose.length === 0) {
     console.log('[inactivity] No inactive tickets found.');
-  }
-}
-
-// Physically delete archived ticket channels older than the retention window,
-// keeping channel counts bounded (Discord caps at 500/guild, 50/category).
-export async function cleanupArchivedTickets(client: Client): Promise<void> {
-  const tickets = await getArchivedTicketsToDelete(ARCHIVE_RETENTION_DAYS).catch(() => []);
-  if (tickets.length === 0) return;
-
-  console.log(`[cleanup] Deleting ${tickets.length} archived ticket channel(s)…`);
-
-  for (const ticket of tickets) {
-    if (!ticket.channel_id) continue;
-    const channel = await client.channels.fetch(ticket.channel_id).catch(() => null);
-    if (channel) {
-      await (channel as TextChannel).delete('Archived ticket cleanup').catch(console.error);
-    }
-    await markChannelDeleted(ticket.id).catch(console.error);
   }
 }

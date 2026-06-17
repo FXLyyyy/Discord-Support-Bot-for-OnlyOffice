@@ -28,6 +28,7 @@ export interface Ticket {
   close_reason: string | null;
   resolution: string | null;
   transcript_url: string | null;
+  opener_left: boolean;
   created_at: string;
   closed_at: string | null;
 }

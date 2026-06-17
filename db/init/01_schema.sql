@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS tickets (
   close_reason         TEXT,
   resolution           TEXT,
   transcript_url       TEXT,
+  opener_left          BOOLEAN     NOT NULL DEFAULT FALSE,  -- set when the opener leaves the server
   created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   closed_at            TIMESTAMPTZ,
   UNIQUE (guild_id, ticket_number)

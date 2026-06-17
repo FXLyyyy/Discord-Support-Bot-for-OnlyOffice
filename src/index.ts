@@ -3,10 +3,12 @@ import { Client, GatewayIntentBits, Partials, Collection, REST, Routes } from 'd
 import { readdirSync } from 'fs';
 import { join } from 'path';
 import { Command } from './types';
-import { checkInactiveTickets, cleanupArchivedTickets } from './handlers/inactivityHandler';
+import { checkInactiveTickets } from './handlers/inactivityHandler';
+import { trimAllGuilds, reconcileTicketChannels } from './handlers/maintenance';
 import { loadActiveTicketChannels } from './cache';
 import { runDatabaseBackup } from './utils/backup';
 import { isDocSpaceConfigured } from './utils/docspace';
+import { runMigrations } from './db/migrate';
 
 // Env is loaded by Node's native --env-file flag (see package.json scripts);
 // docker-compose injects vars directly. No dotenv dependency needed.
@@ -79,8 +81,12 @@ async function registerCommands(): Promise<void> {
 }
 
 client.once('ready', async () => {
+  await runMigrations().catch(err => console.error('[migrate] failed:', err));
   await registerCommands();
   await loadActiveTicketChannels().catch(err => console.error('[cache] load failed:', err));
+
+  // Heal any tickets whose channel vanished while the bot was offline
+  await reconcileTicketChannels(client).catch(err => console.error('[reconcile] startup failed:', err));
 
   // Run inactivity check every 30 minutes
   setInterval(() => {
@@ -88,19 +94,23 @@ client.once('ready', async () => {
   }, 30 * 60 * 1000);
   console.log(`[inactivity] Checker scheduled every 30 minutes`);
 
-  // Clean up old archived ticket channels once a day
+  // Keep each guild under Discord's channel cap by trimming the oldest closed
+  // ticket channels. Runs hourly; a near-free no-op until a guild nears the cap.
   setInterval(() => {
-    cleanupArchivedTickets(client).catch(console.error);
-  }, 24 * 60 * 60 * 1000);
-  console.log(`[cleanup] Archived-ticket cleanup scheduled daily`);
+    trimAllGuilds(client).catch(console.error);
+  }, 60 * 60 * 1000);
+  console.log(`[channelcap] Channel-cap trim scheduled hourly`);
 
   // Scheduled database backup to DocSpace (default every 24h; 0 disables)
   const backupHours = Number(process.env.BACKUP_INTERVAL_HOURS ?? 24);
   if (isDocSpaceConfigured() && backupHours > 0) {
+    // First backup 10 min after startup, so frequent restarts don't keep
+    // postponing it; then on the regular interval.
+    setTimeout(() => runDatabaseBackup().catch(console.error), 10 * 60 * 1000);
     setInterval(() => {
       runDatabaseBackup().catch(console.error);
     }, backupHours * 60 * 60 * 1000);
-    console.log(`[backup] Database backup scheduled every ${backupHours}h`);
+    console.log(`[backup] Database backup scheduled every ${backupHours}h (first run in ~10 min)`);
   }
 
   console.log(`[bot] Logged in as ${client.user?.tag}`);

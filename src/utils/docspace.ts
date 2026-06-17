@@ -15,6 +15,8 @@ export interface DocSpaceUpload {
 export interface DocSpaceFolder {
   folderId: number;
   webUrl: string;
+  /** true when this call created the folder; false when it already existed. */
+  created: boolean;
 }
 
 function authHeaders(): Record<string, string> {
@@ -31,40 +33,40 @@ async function withTimeout<T>(fn: (signal: AbortSignal) => Promise<T>, ms = 2000
   }
 }
 
-/** Creates a subfolder inside the configured transcripts folder. */
-export async function createTicketFolder(title: string): Promise<DocSpaceFolder | null> {
-  if (!isDocSpaceConfigured()) return null;
-  try {
-    const res = await withTimeout(signal =>
-      fetch(`${BASE}/api/2.0/files/folder/${FOLDER_ID}`, {
-        method: 'POST',
-        headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title }),
-        signal,
-      })
-    );
-    if (!res.ok) { console.error(`[docspace] folder create failed: HTTP ${res.status}`); return null; }
-    const data = (await res.json()) as { response?: { id?: number; webUrl?: string } };
-    const r = data.response;
-    if (!r?.id) return null;
-    return { folderId: r.id, webUrl: r.webUrl ?? `${BASE}/rooms/shared/${r.id}/filter?folder=${r.id}` };
-  } catch (err) {
-    console.error('[docspace] folder create error:', err);
-    return null;
+// Retries an operation that signals failure by resolving to null (e.g. a timed-out
+// or 5xx upload). Linear backoff; DocSpace blips during a close shouldn't lose a
+// transcript. Operations here are idempotent (createNewIfExist / find-or-create).
+async function withRetry<T>(label: string, fn: () => Promise<T | null>, attempts = 3): Promise<T | null> {
+  for (let i = 1; i <= attempts; i++) {
+    const res = await fn();
+    if (res !== null) return res;
+    if (i < attempts) {
+      const backoff = 500 * i;
+      console.warn(`[docspace] ${label} attempt ${i}/${attempts} failed — retrying in ${backoff}ms`);
+      await new Promise(r => setTimeout(r, backoff));
+    }
   }
+  console.error(`[docspace] ${label} failed after ${attempts} attempts`);
+  return null;
 }
 
+const folderUrl = (id: number) => `${BASE}/rooms/shared/${id}/filter?folder=${id}`;
+
 /** Finds a subfolder by title under a parent folder, creating it if missing. */
-export async function ensureSubfolder(parentId: number | string, title: string): Promise<number | null> {
+export async function ensureSubfolder(parentId: number | string, title: string): Promise<DocSpaceFolder | null> {
   if (!isDocSpaceConfigured()) return null;
+  return withRetry(`ensureSubfolder(${title})`, () => ensureSubfolderOnce(parentId, title));
+}
+
+async function ensureSubfolderOnce(parentId: number | string, title: string): Promise<DocSpaceFolder | null> {
   try {
     const list = await withTimeout(signal =>
       fetch(`${BASE}/api/2.0/files/${parentId}`, { headers: authHeaders(), signal })
     );
     if (list.ok) {
-      const data = (await list.json()) as { response?: { folders?: Array<{ id: number; title: string }> } };
+      const data = (await list.json()) as { response?: { folders?: Array<{ id: number; title: string; webUrl?: string }> } };
       const existing = data.response?.folders?.find(f => f.title === title);
-      if (existing) return existing.id;
+      if (existing) return { folderId: existing.id, webUrl: existing.webUrl ?? folderUrl(existing.id), created: false };
     }
     const created = await withTimeout(signal =>
       fetch(`${BASE}/api/2.0/files/folder/${parentId}`, {
@@ -75,12 +77,18 @@ export async function ensureSubfolder(parentId: number | string, title: string):
       })
     );
     if (!created.ok) { console.error(`[docspace] subfolder create failed: HTTP ${created.status}`); return null; }
-    const d = (await created.json()) as { response?: { id?: number } };
-    return d.response?.id ?? null;
+    const d = (await created.json()) as { response?: { id?: number; webUrl?: string } };
+    if (!d.response?.id) return null;
+    return { folderId: d.response.id, webUrl: d.response.webUrl ?? folderUrl(d.response.id), created: true };
   } catch (err) {
     console.error('[docspace] ensureSubfolder error:', err);
     return null;
   }
+}
+
+/** Find-or-create a folder directly under the configured transcripts room. */
+export async function ensureRootFolder(title: string): Promise<DocSpaceFolder | null> {
+  return ensureSubfolder(FOLDER_ID, title);
 }
 
 /** Uploads an in-memory buffer as a file into a specific folder. */
@@ -91,6 +99,15 @@ export async function uploadBufferToFolder(
   mime: string
 ): Promise<DocSpaceUpload | null> {
   if (!isDocSpaceConfigured()) return null;
+  return withRetry(`upload(${filename})`, () => uploadBufferOnce(folderId, filename, buffer, mime));
+}
+
+async function uploadBufferOnce(
+  folderId: number,
+  filename: string,
+  buffer: Buffer | Uint8Array,
+  mime: string
+): Promise<DocSpaceUpload | null> {
   try {
     const form = new FormData();
     form.append('title', filename);
