@@ -1,7 +1,7 @@
 import './utils/fileLogger'; // must be first — patches console + captures crashes
 import { Client, GatewayIntentBits, Partials, Collection, REST, Routes } from 'discord.js';
 import { config } from 'dotenv';
-import { readdirSync, existsSync, readFileSync } from 'fs';
+import { readdirSync } from 'fs';
 import { join } from 'path';
 import { Command } from './types';
 import { checkInactiveTickets, cleanupArchivedTickets } from './handlers/inactivityHandler';
@@ -78,23 +78,8 @@ async function registerCommands(): Promise<void> {
   }
 }
 
-// Apply the bundled avatar once, only if the bot doesn't already have one
-// (avoids hitting Discord's avatar-change rate limit on every restart).
-async function applyAvatarOnce(): Promise<void> {
-  try {
-    const avatarPath = join(process.cwd(), 'bot_avatar.jpeg');
-    if (client.user && !client.user.avatar && existsSync(avatarPath)) {
-      await client.user.setAvatar(readFileSync(avatarPath));
-      console.log('[bot] Avatar applied from bot_avatar.jpeg');
-    }
-  } catch (err) {
-    console.error('[bot] Could not set avatar (rate limit or invalid image):', err);
-  }
-}
-
 client.once('ready', async () => {
   await registerCommands();
-  await applyAvatarOnce();
   await loadActiveTicketChannels().catch(err => console.error('[cache] load failed:', err));
 
   // Run inactivity check every 30 minutes

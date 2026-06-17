@@ -16,6 +16,5 @@ RUN apk add --no-cache postgresql-client
 COPY package*.json ./
 RUN npm ci --omit=dev
 COPY --from=build /app/dist ./dist
-COPY bot_avatar.jpeg ./bot_avatar.jpeg
 RUN mkdir -p /app/logs
 CMD ["node", "dist/index.js"]
