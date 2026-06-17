@@ -33,11 +33,32 @@ async function withTimeout<T>(fn: (signal: AbortSignal) => Promise<T>, ms = 2000
   }
 }
 
+// Retries an operation that signals failure by resolving to null (e.g. a timed-out
+// or 5xx upload). Linear backoff; DocSpace blips during a close shouldn't lose a
+// transcript. Operations here are idempotent (createNewIfExist / find-or-create).
+async function withRetry<T>(label: string, fn: () => Promise<T | null>, attempts = 3): Promise<T | null> {
+  for (let i = 1; i <= attempts; i++) {
+    const res = await fn();
+    if (res !== null) return res;
+    if (i < attempts) {
+      const backoff = 500 * i;
+      console.warn(`[docspace] ${label} attempt ${i}/${attempts} failed — retrying in ${backoff}ms`);
+      await new Promise(r => setTimeout(r, backoff));
+    }
+  }
+  console.error(`[docspace] ${label} failed after ${attempts} attempts`);
+  return null;
+}
+
 const folderUrl = (id: number) => `${BASE}/rooms/shared/${id}/filter?folder=${id}`;
 
 /** Finds a subfolder by title under a parent folder, creating it if missing. */
 export async function ensureSubfolder(parentId: number | string, title: string): Promise<DocSpaceFolder | null> {
   if (!isDocSpaceConfigured()) return null;
+  return withRetry(`ensureSubfolder(${title})`, () => ensureSubfolderOnce(parentId, title));
+}
+
+async function ensureSubfolderOnce(parentId: number | string, title: string): Promise<DocSpaceFolder | null> {
   try {
     const list = await withTimeout(signal =>
       fetch(`${BASE}/api/2.0/files/${parentId}`, { headers: authHeaders(), signal })
@@ -78,6 +99,15 @@ export async function uploadBufferToFolder(
   mime: string
 ): Promise<DocSpaceUpload | null> {
   if (!isDocSpaceConfigured()) return null;
+  return withRetry(`upload(${filename})`, () => uploadBufferOnce(folderId, filename, buffer, mime));
+}
+
+async function uploadBufferOnce(
+  folderId: number,
+  filename: string,
+  buffer: Buffer | Uint8Array,
+  mime: string
+): Promise<DocSpaceUpload | null> {
   try {
     const form = new FormData();
     form.append('title', filename);

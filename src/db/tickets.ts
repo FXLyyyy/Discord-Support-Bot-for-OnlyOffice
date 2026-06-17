@@ -134,16 +134,54 @@ export async function markFirstResponse(ticketId: string): Promise<void> {
   await q('UPDATE tickets SET first_response_at = NOW() WHERE id = $1 AND first_response_at IS NULL', [ticketId]);
 }
 
-export async function getArchivedTicketsToDelete(retentionDays: number): Promise<Ticket[]> {
-  const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000).toISOString();
+// Oldest CLOSED ticket channels in a guild, for trimming back under the channel
+// cap. Oldest-closed first (NULLS FIRST guards against any legacy rows missing
+// closed_at). Limited to the number we actually need to delete.
+export async function getDeletableClosedTickets(guildId: string, limit: number): Promise<Ticket[]> {
+  if (limit <= 0) return [];
   return q<Ticket>(
-    `SELECT * FROM tickets WHERE status = 'closed' AND channel_id IS NOT NULL AND closed_at < $1`,
-    [cutoff]
+    `SELECT * FROM tickets
+       WHERE guild_id = $1 AND status = 'closed' AND channel_id IS NOT NULL
+       ORDER BY closed_at ASC NULLS FIRST
+       LIMIT $2`,
+    [guildId, limit]
   );
+}
+
+// Active (open/claimed) tickets that still reference a channel — used by the
+// startup reconciliation to detect channels deleted while the bot was offline.
+export async function getActiveTicketsWithChannel(): Promise<Ticket[]> {
+  return q<Ticket>(
+    `SELECT * FROM tickets WHERE status IN ('open','claimed') AND channel_id IS NOT NULL`
+  );
+}
+
+// All open/claimed tickets a user owns in a guild (a user has at most one live
+// ticket, but we return a list to be safe against legacy duplicates).
+export async function getOpenTicketsForUserInGuild(guildId: string, userId: string): Promise<Ticket[]> {
+  return q<Ticket>(
+    `SELECT * FROM tickets WHERE guild_id = $1 AND user_id = $2 AND status IN ('open','claimed')`,
+    [guildId, userId]
+  );
+}
+
+export async function markOpenerLeft(ticketId: string): Promise<void> {
+  await q('UPDATE tickets SET opener_left = TRUE WHERE id = $1', [ticketId]);
 }
 
 export async function markChannelDeleted(ticketId: string): Promise<void> {
   await q('UPDATE tickets SET channel_id = NULL WHERE id = $1', [ticketId]);
+}
+
+// Marks a ticket closed because its channel vanished (manual delete / offline
+// deletion). Clears the channel reference so it can be recreated on reopen.
+export async function markTicketChannelGone(ticketId: string): Promise<void> {
+  await q(
+    `UPDATE tickets SET status = 'closed', channel_id = NULL,
+            closed_at = COALESCE(closed_at, NOW())
+       WHERE id = $1 AND status <> 'closed'`,
+    [ticketId]
+  );
 }
 
 export async function getTicketsForInactivityCheck(): Promise<{ toWarn: Ticket[]; toClose: Ticket[] }> {

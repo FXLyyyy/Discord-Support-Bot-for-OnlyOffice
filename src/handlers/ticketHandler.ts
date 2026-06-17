@@ -55,7 +55,8 @@ import {
 import { logToChannel } from '../utils/logger';
 import { isSupportMember } from '../utils/permissions';
 import { generateTranscriptDocx } from '../utils/transcriptDocx';
-import { ensureRootFolder, ensureSubfolder, uploadBufferToFolder, uploadUrlToFolder } from '../utils/docspace';
+import { ensureRootFolder, ensureSubfolder, uploadBufferToFolder, uploadUrlToFolder, isDocSpaceConfigured } from '../utils/docspace';
+import { trimGuildChannels } from './maintenance';
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -69,6 +70,18 @@ const BOT_MISSING_PERMS_MESSAGE =
   '⚠️ **The bot is missing permissions to create your ticket channel.**\n' +
   'Please ask an administrator to grant the bot **Manage Channels** and **Manage Roles** ' +
   "(and to position the bot's role above the support roles), then try again.";
+
+// Serializes heavy per-ticket operations (close / reopen) so a double-click — or
+// a close racing a reopen on the same ticket — can't run the same flow twice.
+const ticketsInFlight = new Set<string>();
+function acquireTicket(id: string): boolean {
+  if (ticketsInFlight.has(id)) return false;
+  ticketsInFlight.add(id);
+  return true;
+}
+function releaseTicket(id: string): void {
+  ticketsInFlight.delete(id);
+}
 
 // Builds a private ticket channel with the standard permission overwrites.
 async function buildTicketChannel(
@@ -385,6 +398,10 @@ export async function handleTicketModal(
 
   const ticketNumber = await getNextTicketNumber(guild.id);
 
+  // Make room first: if the guild is near Discord's 500-channel cap, trim the
+  // oldest closed ticket channels so creation below never hits the hard limit.
+  await trimGuildChannels(guild).catch(err => console.error('[ticket] pre-create trim failed:', err));
+
   let channel: TextChannel;
   try {
     channel = await buildTicketChannel(
@@ -483,6 +500,24 @@ export async function handleTicketModal(
 export async function closeTicket(
   interaction: TicketInteraction,
   ticket: Ticket,
+  config: ServerConfig,
+  opts: { resolution?: string | null; reason?: string | null } = {}
+): Promise<void> {
+  if (!acquireTicket(ticket.id)) {
+    const msg = { content: '⏳ This ticket is already being processed — give it a moment.', flags: MessageFlags.Ephemeral as const };
+    await (interaction.deferred || interaction.replied ? interaction.followUp(msg) : interaction.reply(msg)).catch(() => null);
+    return;
+  }
+  try {
+    await closeTicketImpl(interaction, ticket, config, opts);
+  } finally {
+    releaseTicket(ticket.id);
+  }
+}
+
+async function closeTicketImpl(
+  interaction: TicketInteraction,
+  ticket: Ticket,
   _config: ServerConfig,
   opts: { resolution?: string | null; reason?: string | null } = {}
 ): Promise<void> {
@@ -561,9 +596,11 @@ export async function closeTicket(
   const docMime = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
   let folderUrl: string | null = null;
   let reclose = false;
+  let archiveOk = false; // folder created AND the staff transcript uploaded
+  const docSpaceOn = isDocSpaceConfigured();
   const sessionStamp = new Date().toISOString().slice(0, 16).replace('T', ' ').replace(/:/g, '-');
 
-  const container = await ensureRootFolder(`Ticket #${ticket.ticket_number} — ${openerTag}`);
+  const container = docSpaceOn ? await ensureRootFolder(`Ticket #${ticket.ticket_number} — ${openerTag}`) : null;
   if (container) {
     folderUrl = container.webUrl;
     reclose = !container.created; // folder already existed → this is a re-close after reopen
@@ -576,7 +613,8 @@ export async function closeTicket(
       openedByTag: openerTag, agentTag, guildName: guild.name, includeInternal: true,
     }).catch(() => null);
     if (staffDocx) {
-      await uploadBufferToFolder(destId, `ticket-${ticket.ticket_number}-transcript.docx`, staffDocx, docMime).catch(() => null);
+      const uploaded = await uploadBufferToFolder(destId, `ticket-${ticket.ticket_number}-transcript.docx`, staffDocx, docMime).catch(() => null);
+      archiveOk = !!uploaded;
     }
     // Relay the user's attachments into the same session folder
     for (const m of transcriptMessages) {
@@ -592,11 +630,18 @@ export async function closeTicket(
   const logLines = reclose
     ? [`🔁 **Ticket #${ticket.ticket_number} re-closed** (reopened earlier) — from <@${ticket.user_id}> · session ${sessionStamp}`]
     : [`📄 **Ticket #${ticket.ticket_number} closed** — from <@${ticket.user_id}> · session ${sessionStamp}`];
-  if (folderUrl) {
+  if (!docSpaceOn) {
+    logLines.push('ℹ️ DocSpace not configured — transcript kept in the database only.');
+  } else if (archiveOk && folderUrl) {
     logLines.push(`📁 DocSpace folder: ${folderUrl}`);
     closeEmbed.addFields({ name: '📁 Transcript folder (DocSpace)', value: `[Open in DocSpace](${folderUrl})` });
   } else {
-    logLines.push('⚠️ DocSpace not configured — transcript was not archived.');
+    // Configured but the archive didn't fully succeed — make it loud & actionable.
+    logLines.push(
+      `⚠️ **DocSpace archiving failed for ticket #${ticket.ticket_number}.** The transcript may be missing or incomplete — ` +
+      `please check DocSpace and re-archive if needed.`
+    );
+    if (folderUrl) logLines.push(`📁 Partial folder: ${folderUrl}`);
   }
   await logToChannel(interaction.client, guild.id, closeEmbed, undefined, logLines.join('\n'));
 
@@ -618,7 +663,11 @@ export async function closeTicket(
   );
   const channelLines = [`🔒 **This ticket has been closed by ${member}.**`];
   if (resolution) channelLines.push('', '**Resolution:**', `>>> ${resolution}`);
-  channelLines.push('', 'Need more help? Reopen this ticket any time with the button below. 🔄');
+  channelLines.push(
+    '',
+    'Need more help? Reopen this ticket any time with the button below. 🔄',
+    '_This channel is temporary and may be removed later — your full transcript is saved._'
+  );
   await channel?.send({
     content: channelLines.join('\n'),
     components: [reopenRow],
@@ -645,8 +694,8 @@ export async function closeTicket(
     if (resolution) dmLines.push('', '**Resolution from our team:**', `>>> ${resolution}`);
     dmLines.push(
       '',
-      `A full transcript is attached for your records. Thanks for contacting **OnlyOffice Support**! ` +
-      `If you need more help you can reopen this ticket below, or rate how we did. ⭐`
+      `The attached transcript is your permanent copy — keep it for your records, as the ticket channel on the server is temporary. ` +
+      `Thanks for contacting **OnlyOffice Support**! If you need more help you can reopen this ticket below, or rate how we did. ⭐`
     );
 
     await openerUser
@@ -697,8 +746,23 @@ export async function showCloseModal(interaction: ButtonInteraction): Promise<vo
 // ── Reopen a closed ticket ────────────────────────────────────────────────────
 
 // Core reopen: reuse the archived channel (chat preserved); if it was already
-// cleaned up, build a fresh one. Returns the live channel.
+// cleaned up, build a fresh one. Returns the live channel. Guarded against
+// concurrent close/reopen on the same ticket (returns null if one is in flight).
 async function performReopen(
+  client: Client,
+  guild: Guild,
+  config: ServerConfig,
+  ticket: Ticket
+): Promise<TextChannel | null> {
+  if (!acquireTicket(ticket.id)) return null;
+  try {
+    return await performReopenImpl(client, guild, config, ticket);
+  } finally {
+    releaseTicket(ticket.id);
+  }
+}
+
+async function performReopenImpl(
   client: Client,
   guild: Guild,
   config: ServerConfig,
