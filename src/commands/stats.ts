@@ -2,7 +2,7 @@ import { MessageFlags, SlashCommandBuilder, ChatInputCommandInteraction, EmbedBu
 import { getTicketStats } from '../db/tickets';
 import { getServerConfig } from '../db/servers';
 import { errorEmbed } from '../utils/embeds';
-import { isSupportMember } from '../utils/permissions';
+import { isAdmin } from '../utils/permissions';
 
 export const data = new SlashCommandBuilder()
   .setName('stats')
@@ -17,8 +17,8 @@ function fmtHours(h: number): string {
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
   const config = await getServerConfig(interaction.guildId!);
   const member = interaction.member as GuildMember;
-  if (!config || !isSupportMember(member, config)) {
-    await interaction.reply({ embeds: [errorEmbed('Only support staff can view statistics.')], flags: MessageFlags.Ephemeral });
+  if (!config || !isAdmin(member, config)) {
+    await interaction.reply({ embeds: [errorEmbed('Only administrators can view statistics.')], flags: MessageFlags.Ephemeral });
     return;
   }
 

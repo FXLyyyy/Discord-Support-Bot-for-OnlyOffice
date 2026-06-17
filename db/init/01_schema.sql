@@ -6,6 +6,7 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 -- Per-guild configuration
 CREATE TABLE IF NOT EXISTS servers (
   guild_id           TEXT        PRIMARY KEY,
+  admin_role_ids     JSONB       NOT NULL DEFAULT '[]',
   support_role_ids   JSONB       NOT NULL DEFAULT '[]',
   log_channel_id     TEXT,
   ticket_category_id TEXT,

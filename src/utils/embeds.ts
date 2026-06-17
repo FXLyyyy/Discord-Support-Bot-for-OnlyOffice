@@ -87,7 +87,11 @@ export function ticketWelcomeEmbed(
 }
 
 export function configViewEmbed(config: ServerConfig): EmbedBuilder {
-  const roles = config.support_role_ids.length
+  const adminRoles = (config.admin_role_ids ?? []).length
+    ? (config.admin_role_ids ?? []).map(id => `<@&${id}>`).join(', ')
+    : 'None (Discord admins only)';
+
+  const agentRoles = config.support_role_ids.length
     ? config.support_role_ids.map(id => `<@&${id}>`).join(', ')
     : 'None';
 
@@ -95,7 +99,8 @@ export function configViewEmbed(config: ServerConfig): EmbedBuilder {
     .setTitle('⚙️ Server Configuration')
     .setColor(Colors.Blue)
     .addFields(
-      { name: 'Support Roles', value: roles, inline: false },
+      { name: 'Admin Roles', value: adminRoles, inline: false },
+      { name: 'Agent Roles', value: agentRoles, inline: false },
       { name: 'Log Channel', value: config.log_channel_id ? `<#${config.log_channel_id}>` : 'Not set', inline: true },
       { name: 'Ticket Category', value: config.ticket_category_id ? `<#${config.ticket_category_id}>` : 'Not set', inline: true }
     )

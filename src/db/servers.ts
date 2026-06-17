@@ -1,10 +1,10 @@
 import { q, one } from './client';
 import { ServerConfig } from '../types';
 
-const JSONB_KEYS = new Set(['support_role_ids']);
+const JSONB_KEYS = new Set(['support_role_ids', 'admin_role_ids']);
 // Only these columns may be written — guards the dynamic INSERT/UPDATE below
 // against any column name reaching it that wasn't a hard-coded literal.
-const WRITABLE_COLUMNS = new Set(['support_role_ids', 'log_channel_id', 'ticket_category_id']);
+const WRITABLE_COLUMNS = new Set(['admin_role_ids', 'support_role_ids', 'log_channel_id', 'ticket_category_id']);
 
 // Write-through in-memory cache — config is read on almost every interaction
 // but changes only via /config.

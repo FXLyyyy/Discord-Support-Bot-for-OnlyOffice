@@ -1,5 +1,6 @@
 export interface ServerConfig {
   guild_id: string;
+  admin_role_ids: string[];
   support_role_ids: string[];
   log_channel_id: string | null;
   ticket_category_id: string | null;

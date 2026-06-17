@@ -3,7 +3,7 @@ import { getTicketByChannel } from '../db/tickets';
 import { getServerConfig } from '../db/servers';
 import { assignTicket } from '../handlers/ticketHandler';
 import { errorEmbed } from '../utils/embeds';
-import { isSupportMember } from '../utils/permissions';
+import { isAdmin } from '../utils/permissions';
 
 export const data = new SlashCommandBuilder()
   .setName('assign')
@@ -16,8 +16,8 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
   const config = await getServerConfig(interaction.guildId!);
   const member = interaction.member as GuildMember;
 
-  if (!config || !isSupportMember(member, config)) {
-    await interaction.reply({ embeds: [errorEmbed('Only support staff can assign tickets.')], flags: MessageFlags.Ephemeral });
+  if (!config || !isAdmin(member, config)) {
+    await interaction.reply({ embeds: [errorEmbed('Only administrators can assign tickets.')], flags: MessageFlags.Ephemeral });
     return;
   }
 
