@@ -1,7 +1,3 @@
-import { config } from 'dotenv';
-
-config();
-
 const BASE = (process.env.DOCSPACE_BASE_URL ?? '').replace(/\/+$/, '');
 const API_KEY = process.env.DOCSPACE_API_KEY ?? '';
 const FOLDER_ID = process.env.DOCSPACE_TRANSCRIPTS_FOLDER_ID ?? '';

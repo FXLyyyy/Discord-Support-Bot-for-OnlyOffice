@@ -52,7 +52,6 @@ import {
 import { logToChannel } from '../utils/logger';
 import { isSupportMember } from '../utils/permissions';
 import { generateTranscriptHtml } from '../utils/transcriptHtml';
-import { generateTranscriptPdf } from '../utils/transcriptPdf';
 import { createTicketFolder, uploadBufferToFolder, uploadUrlToFolder } from '../utils/docspace';
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
@@ -546,13 +545,14 @@ export async function closeTicket(
   const folder = await createTicketFolder(`Ticket #${ticket.ticket_number} — ${openerTag}`);
   if (folder) {
     folderUrl = folder.webUrl;
-    const staffPdf = await generateTranscriptPdf({
-      ticket: closedTicket, messages: transcriptMessages, notes,
-      openedByTag: openerTag, agentTag, guildName: guild.name, includeInternal: true,
-    }).catch(() => null);
-    if (staffPdf) {
-      await uploadBufferToFolder(folder.folderId, `ticket-${ticket.ticket_number}-transcript.pdf`, staffPdf, 'application/pdf');
-    }
+    // Archive the staff HTML we already generated above (includes internal notes).
+    // DocSpace stores/previews HTML directly — no PDF toolchain required.
+    await uploadBufferToFolder(
+      folder.folderId,
+      `ticket-${ticket.ticket_number}-transcript.html`,
+      Buffer.from(htmlContent, 'utf-8'),
+      'text/html',
+    ).catch(() => null);
     // Relay every user attachment into the same folder
     for (const m of transcriptMessages) {
       for (const a of m.attachments) {

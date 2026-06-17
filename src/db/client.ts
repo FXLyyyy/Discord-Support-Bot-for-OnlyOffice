@@ -1,7 +1,4 @@
 import { Pool } from 'pg';
-import { config } from 'dotenv';
-
-config();
 
 // Require TLS when talking to a REMOTE database (set PGSSL=require). Inside the
 // docker-compose network the DB is plaintext on a private network, which is fine.
