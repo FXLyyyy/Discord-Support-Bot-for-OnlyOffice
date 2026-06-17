@@ -24,6 +24,7 @@ import { MessageFlags,
   Snowflake,
   EmbedBuilder,
   Colors,
+  DiscordAPIError,
 } from 'discord.js';
 import { ServerConfig, Ticket, TicketMessage } from '../types';
 import {
@@ -55,6 +56,17 @@ import { generateTranscriptHtml } from '../utils/transcriptHtml';
 import { createTicketFolder, uploadBufferToFolder, uploadUrlToFolder } from '../utils/docspace';
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
+
+// True when Discord rejected an action because the BOT lacks permissions
+// (50013 Missing Permissions / 50001 Missing Access) — not the user.
+function isBotMissingPermissions(err: unknown): boolean {
+  return err instanceof DiscordAPIError && (err.code === 50013 || err.code === 50001);
+}
+
+const BOT_MISSING_PERMS_MESSAGE =
+  '⚠️ **The bot is missing permissions to create your ticket channel.**\n' +
+  'Please ask an administrator to grant the bot **Manage Channels** and **Manage Roles** ' +
+  "(and to position the bot's role above the support roles), then try again.";
 
 // Builds a private ticket channel with the standard permission overwrites.
 async function buildTicketChannel(
@@ -369,9 +381,19 @@ export async function handleTicketModal(
 
   const ticketNumber = await getNextTicketNumber(guild.id);
 
-  const channel = await buildTicketChannel(
-    guild, config, member.id, interaction.client.user.id, ticketNumber, subject, member.user.tag,
-  );
+  let channel: TextChannel;
+  try {
+    channel = await buildTicketChannel(
+      guild, config, member.id, interaction.client.user.id, ticketNumber, subject, member.user.tag,
+    );
+  } catch (err) {
+    if (isBotMissingPermissions(err)) {
+      console.error(`[ticket] Missing bot permissions creating channel in guild ${guild.id}:`, err);
+      await interaction.editReply({ content: BOT_MISSING_PERMS_MESSAGE });
+      return;
+    }
+    throw err;
+  }
 
   const newTicket = await createTicket({
     guildId: guild.id,
