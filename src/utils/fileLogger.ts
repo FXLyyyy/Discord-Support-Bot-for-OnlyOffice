@@ -5,11 +5,22 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 const LOG_DIR = path.join(process.cwd(), 'logs');
-try { fs.mkdirSync(LOG_DIR, { recursive: true }); } catch { /* ignore */ }
+// Restrict the log directory — logs may contain operational/PII data.
+try { fs.mkdirSync(LOG_DIR, { recursive: true, mode: 0o700 }); } catch { /* ignore */ }
+
+const MAX_LOG_BYTES = 10 * 1024 * 1024; // rotate the day's file once it passes 10 MB
 
 function logFilePath(): string {
   const day = new Date().toISOString().slice(0, 10);
   return path.join(LOG_DIR, `bot-${day}.log`);
+}
+
+// Strip anything that looks like a secret before it ever hits disk.
+function redact(s: string): string {
+  return s
+    .replace(/(Bearer\s+)[A-Za-z0-9._-]+/gi, '$1[REDACTED]')
+    .replace(/(postgres(?:ql)?:\/\/[^:@/]+:)[^@]+@/gi, '$1[REDACTED]@')
+    .replace(/\b(sk-[A-Za-z0-9._-]{6,})\b/g, '[REDACTED]');
 }
 
 function fmtArg(a: unknown): string {
@@ -19,8 +30,17 @@ function fmtArg(a: unknown): string {
 }
 
 function write(level: string, args: unknown[]): void {
-  const line = `[${new Date().toISOString()}] [${level}] ${args.map(fmtArg).join(' ')}\n`;
-  try { fs.appendFileSync(logFilePath(), line); } catch { /* never let logging crash the bot */ }
+  const line = redact(`[${new Date().toISOString()}] [${level}] ${args.map(fmtArg).join(' ')}\n`);
+  try {
+    const file = logFilePath();
+    // Size-cap: roll the current file aside if it grows too large.
+    try {
+      if (fs.statSync(file).size > MAX_LOG_BYTES) {
+        fs.renameSync(file, `${file}.${Date.now()}.old`);
+      }
+    } catch { /* file may not exist yet */ }
+    fs.appendFileSync(file, line);
+  } catch { /* never let logging crash the bot */ }
 }
 
 const original = {

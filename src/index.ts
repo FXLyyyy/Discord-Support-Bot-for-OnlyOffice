@@ -25,6 +25,9 @@ const client = new Client({
     GatewayIntentBits.GuildMembers,
   ],
   partials: [Partials.Channel, Partials.Message, Partials.GuildMember],
+  // Nothing pings by default — every place that should mention sets allowedMentions
+  // explicitly. Closes mention-injection (@everyone in user/agent text) globally.
+  allowedMentions: { parse: [] },
 }) as BotClient;
 
 client.commands = new Collection<string, Command>();

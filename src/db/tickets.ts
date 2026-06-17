@@ -20,6 +20,10 @@ export async function getTicketByChannel(channelId: string): Promise<Ticket | nu
   return one<Ticket>('SELECT * FROM tickets WHERE channel_id = $1', [channelId]);
 }
 
+export async function getTicketById(ticketId: string): Promise<Ticket | null> {
+  return one<Ticket>('SELECT * FROM tickets WHERE id = $1', [ticketId]);
+}
+
 export async function getTicketByNumber(guildId: string, ticketNumber: number): Promise<Ticket | null> {
   return one<Ticket>('SELECT * FROM tickets WHERE guild_id = $1 AND ticket_number = $2', [guildId, ticketNumber]);
 }

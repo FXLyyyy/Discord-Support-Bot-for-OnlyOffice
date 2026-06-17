@@ -104,7 +104,10 @@ export function generateTranscriptHtml(params: {
     lastUser = msg.username;
 
     const atts = msg.attachments
-      .map(a => `<a class="att" href="${esc(a.url)}" target="_blank">📎 ${esc(a.name)}</a>`)
+      .map(a => {
+        const safeHref = /^https?:\/\//i.test(a.url) ? esc(a.url) : '#';
+        return `<a class="att" href="${safeHref}" rel="noopener noreferrer" target="_blank">📎 ${esc(a.name)}</a>`;
+      })
       .join('');
 
     const textHtml = msg.content
@@ -113,7 +116,7 @@ export function generateTranscriptHtml(params: {
 
     if (newGroup) {
       const color = avatarColor(msg.username);
-      const init = msg.username.slice(0, 2).toUpperCase();
+      const init = esc(msg.username.slice(0, 2).toUpperCase());
       body += `
 <div class="msg new">
   <div class="avc"><div class="av" style="background:${color}">${init}</div></div>
@@ -142,6 +145,7 @@ export function generateTranscriptHtml(params: {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src https:; base-uri 'none'; form-action 'none'">
 <title>Ticket #${ticket.ticket_number} — ${esc(ticket.subject)}</title>
 <style>
 :root{--bg:#313338;--bg2:#2b2d31;--bg3:#1e1f22;--t:#dbdee1;--t2:#949ba4;--mu:#6d6f78;--ac:#5865f2;--red:#f23f43;}

@@ -3,6 +3,7 @@ import { MessageFlags,
   ChatInputCommandInteraction,
   PermissionFlagsBits,
   ChannelType,
+  TextChannel,
 } from 'discord.js';
 import { ensureServerConfig, getServerConfig, upsertServerConfig } from '../db/servers';
 import { configViewEmbed, errorEmbed, successEmbed } from '../utils/embeds';
@@ -63,7 +64,18 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     }
 
     case 'set-log-channel': {
-      const channel = interaction.options.getChannel('channel', true);
+      const channel = interaction.options.getChannel('channel', true) as TextChannel;
+      // Transcripts contain full conversations — refuse a channel @everyone can read.
+      const everyonePerms = channel.permissionsFor(interaction.guild!.roles.everyone);
+      if (everyonePerms?.has(PermissionFlagsBits.ViewChannel)) {
+        await interaction.reply({
+          embeds: [errorEmbed(
+            `${channel} is visible to @everyone. Transcripts are sensitive — choose a staff-only channel.`
+          )],
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
       await upsertServerConfig(guildId, { log_channel_id: channel.id });
       await interaction.reply({ embeds: [successEmbed(`Log channel set to ${channel}.`)], flags: MessageFlags.Ephemeral });
       break;

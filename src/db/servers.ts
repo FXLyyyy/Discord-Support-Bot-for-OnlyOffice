@@ -2,6 +2,9 @@ import { q, one } from './client';
 import { ServerConfig } from '../types';
 
 const JSONB_KEYS = new Set(['support_role_ids']);
+// Only these columns may be written — guards the dynamic INSERT/UPDATE below
+// against any column name reaching it that wasn't a hard-coded literal.
+const WRITABLE_COLUMNS = new Set(['support_role_ids', 'log_channel_id', 'ticket_category_id']);
 
 // Write-through in-memory cache — config is read on almost every interaction
 // but changes only via /config.
@@ -20,6 +23,8 @@ export async function upsertServerConfig(
   updates: Partial<Omit<ServerConfig, 'guild_id' | 'created_at' | 'updated_at'>>
 ): Promise<ServerConfig> {
   const keys = Object.keys(updates);
+  const illegal = keys.find(k => !WRITABLE_COLUMNS.has(k));
+  if (illegal) throw new Error(`Refusing to write unknown server column: ${illegal}`);
 
   if (keys.length === 0) {
     await q('INSERT INTO servers (guild_id) VALUES ($1) ON CONFLICT (guild_id) DO NOTHING', [guildId]);

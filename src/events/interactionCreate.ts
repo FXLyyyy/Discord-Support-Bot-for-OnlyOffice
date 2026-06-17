@@ -6,7 +6,7 @@ import { MessageFlags,
   EmbedBuilder,
   Colors,
 } from 'discord.js';
-import { getTicketByChannel, saveRating } from '../db/tickets';
+import { getTicketByChannel, getTicketById, saveRating } from '../db/tickets';
 import { ensureServerConfig } from '../db/servers';
 import {
   openTicket,
@@ -96,6 +96,13 @@ export async function execute(interaction: Interaction): Promise<void> {
 
     if (isNaN(rating) || rating < 1 || rating > 5) {
       await btn.reply({ content: '❌ Invalid rating.', flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    // Only the ticket owner may rate their own ticket (defense-in-depth)
+    const ratedTicket = await getTicketById(ticketId).catch(() => null);
+    if (!ratedTicket || ratedTicket.user_id !== btn.user.id) {
+      await btn.reply({ content: '❌ This rating is not for you.', flags: MessageFlags.Ephemeral });
       return;
     }
 

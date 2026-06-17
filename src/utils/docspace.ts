@@ -87,6 +87,8 @@ export async function uploadBufferToFolder(
 }
 
 /** Downloads a (Discord CDN) URL and uploads it into a folder. Skips files > maxBytes. */
+const DISCORD_CDN_HOSTS = new Set(['cdn.discordapp.com', 'media.discordapp.net']);
+
 export async function uploadUrlToFolder(
   folderId: number,
   url: string,
@@ -94,6 +96,15 @@ export async function uploadUrlToFolder(
   maxBytes = 25 * 1024 * 1024
 ): Promise<boolean> {
   if (!isDocSpaceConfigured()) return false;
+
+  // SSRF guard: only ever fetch attachments from Discord's CDN over HTTPS.
+  let parsed: URL;
+  try { parsed = new URL(url); } catch { return false; }
+  if (parsed.protocol !== 'https:' || !DISCORD_CDN_HOSTS.has(parsed.hostname)) {
+    console.warn(`[docspace] refusing non-Discord attachment URL: ${parsed.hostname}`);
+    return false;
+  }
+
   try {
     const res = await withTimeout(signal => fetch(url, { signal }), 30000);
     if (!res.ok) return false;

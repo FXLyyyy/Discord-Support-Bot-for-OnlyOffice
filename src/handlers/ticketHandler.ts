@@ -595,7 +595,11 @@ export async function closeTicket(
   const channelLines = [`🔒 **This ticket has been closed by ${member}.**`];
   if (resolution) channelLines.push('', '**Resolution:**', `>>> ${resolution}`);
   channelLines.push('', 'Need more help? Reopen this ticket any time with the button below. 🔄');
-  await channel?.send({ content: channelLines.join('\n'), components: [reopenRow] }).catch(console.error);
+  await channel?.send({
+    content: channelLines.join('\n'),
+    components: [reopenRow],
+    allowedMentions: { parse: [] }, // resolution is free text — never auto-ping
+  }).catch(console.error);
 
   // DM user: closure (+ resolution) + transcript (no internals) + rating
   if (openerUser) {
